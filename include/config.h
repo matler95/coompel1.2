@@ -45,6 +45,13 @@
 #define MPU6050_I2C_ADDRESS 0x68  // Default address (0x69 if AD0=HIGH)
 #define MOTION_INT_PIN      10    // Interrupt pin for motion events
 
+// ============================================================================
+// TOUCH SENSOR (TTP223)
+// ============================================================================
+#define TOUCH_SENSOR_PIN    10    // GPIO for TTP223 output (adjust for your board)
+#define TOUCH_ENABLED       false // Set to true when TTP223 is connected
+
+
 // Gesture Detection Thresholds
 #define ACCEL_THRESHOLD_TAP     2.5f   // G-force for tap detection
 #define ACCEL_THRESHOLD_SHAKE   8.0f   // G-force for shake

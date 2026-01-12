@@ -1,227 +1,250 @@
 /**
  * @file main.cpp
- * @brief ESP32-C3 Interactive Device - Display Test
- * @version 0.2.0
+ * @brief ESP32-C3 Interactive Device - Motion + Touch Test
+ * @version 0.4.1
  * 
- * Phase 2: Testing DisplayManager library
+ * Phase 4.1: Motion (shake/tilt) + Touch sensor ready
  */
 
 #include <Arduino.h>
 #include "config.h"
-#include "DisplayManager.h"  // Our new library!
+#include "DisplayManager.h"
+#include "InputManager.h"
+#include "MotionSensor.h"
+#include "TouchSensor.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
 // ============================================================================
 DisplayManager display;
+InputManager input;
+MotionSensor motion;
+TouchSensor touch(TOUCH_SENSOR_PIN);
 
 // ============================================================================
-// DEMO STATE MACHINE
+// EVENT TRACKING
 // ============================================================================
-enum class DemoMode {
-    TEXT_DEMO,
-    BITMAP_DEMO,
-    UI_DEMO,
-    ANIMATION_DEMO
-};
-
-DemoMode currentDemo = DemoMode::TEXT_DEMO;
-unsigned long lastDemoSwitch = 0;
-const unsigned long DEMO_DURATION = 5000;  // 5 seconds per demo
+String lastTouchEvent = "None";
+String lastMotionEvent = "None";
+uint16_t tapCount = 0;
+uint16_t doubleTapCount = 0;
+uint16_t shakeCount = 0;
+float accelX = 0, accelY = 0, accelZ = 0;
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
-void runCurrentDemo();
-void demoText();
-void demoBitmap();
-void demoUI();
-void demoAnimation();
+void updateDisplay();
+void onMotionEvent(MotionEvent event);
+void onTouchEvent(TouchEvent event);
+void onButtonEvent(ButtonEvent event);
+
+// ============================================================================
+// TOUCH CALLBACK
+// ============================================================================
+
+void onTouchEvent(TouchEvent event) {
+    switch (event) {
+        case TouchEvent::TAP:
+            lastTouchEvent = "TAP!";
+            tapCount++;
+            Serial.println("[TOUCH] Tap!");
+            break;
+            
+        case TouchEvent::DOUBLE_TAP:
+            lastTouchEvent = "DOUBLE TAP!!";
+            doubleTapCount++;
+            Serial.println("[TOUCH] Double tap!");
+            break;
+            
+        case TouchEvent::LONG_TOUCH:
+            lastTouchEvent = "LONG TOUCH";
+            Serial.println("[TOUCH] Long touch!");
+            break;
+            
+        default:
+            break;
+    }
+}
+
+// ============================================================================
+// MOTION CALLBACK
+// ============================================================================
+
+void onMotionEvent(MotionEvent event) {
+    switch (event) {
+        case MotionEvent::SHAKE:
+            lastMotionEvent = "SHAKE!!!";
+            shakeCount++;
+            Serial.println("[MOTION] Shake!");
+            break;
+            
+        default:
+            break;
+    }
+}
+
+// ============================================================================
+// BUTTON CALLBACK (Simulate touch when TTP223 not connected)
+// ============================================================================
+
+void onButtonEvent(ButtonEvent event) {
+    #if !TOUCH_ENABLED
+    // Use button to simulate touch events when TTP223 not available
+    switch (event) {
+        case ButtonEvent::CLICK:
+            lastTouchEvent = "TAP (BTN)";
+            tapCount++;
+            Serial.println("[BUTTON] Simulating tap");
+            break;
+            
+        case ButtonEvent::DOUBLE_CLICK:
+            lastTouchEvent = "DBL (BTN)";
+            doubleTapCount++;
+            Serial.println("[BUTTON] Simulating double tap");
+            break;
+            
+        case ButtonEvent::LONG_PRESS:
+            lastTouchEvent = "LONG (BTN)";
+            Serial.println("[BUTTON] Simulating long touch");
+            break;
+            
+        default:
+            break;
+    }
+    #else
+    // With TTP223, button resets counters
+    if (event == ButtonEvent::CLICK) {
+        tapCount = 0;
+        doubleTapCount = 0;
+        shakeCount = 0;
+        lastTouchEvent = "Reset";
+        lastMotionEvent = "Reset";
+    }
+    #endif
+}
 
 // ============================================================================
 // SETUP
 // ============================================================================
+
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     delay(1000);
     
     Serial.println("\n========================================");
-    Serial.println("ESP32-C3 Interactive Device v0.2.0");
-    Serial.println("Phase 2: Display Manager Test");
+    Serial.println("ESP32-C3 Interactive Device v0.4.1");
+    Serial.println("Phase 4: Motion + Touch Test");
     Serial.println("========================================\n");
     
     // Initialize display
-    Serial.println("[INIT] Starting display...");
     if (!display.init(I2C_SDA_PIN, I2C_SCL_PIN)) {
-        Serial.println("[ERROR] Display initialization failed!");
-        Serial.println("[ERROR] Check I2C wiring and address");
-        while (1) {
-            delay(1000);  // Halt on critical error
-        }
+        Serial.println("[ERROR] Display failed!");
+        while (1) delay(1000);
     }
     
-    Serial.println("[INIT] Display ready!");
-    Serial.println("========================================\n");
+    // Initialize input
+    if (!input.init(BTN_SELECT_PIN, BTN_BACK_PIN)) {
+        Serial.println("[ERROR] Input failed!");
+        while (1) delay(1000);
+    }
+    input.setButtonCallback(ButtonID::SELECT, onButtonEvent);
     
-    delay(2000);  // Let user see boot screen
+    // Initialize motion sensor
+    if (!motion.init(&Wire)) {
+        Serial.println("[ERROR] Motion sensor failed!");
+        display.clear();
+        display.showTextCentered("MPU6050", 10, 2);
+        display.showTextCentered("NOT FOUND!", 30, 1);
+        display.update();
+        while (1) delay(1000);
+    }
+    motion.setCallback(onMotionEvent);
+    motion.setShakeThreshold(20.0f);
+    
+    // Initialize touch sensor
+    #if TOUCH_ENABLED
+    touch.begin();
+    touch.setCallback(onTouchEvent);
+    Serial.println("[TOUCH] TTP223 enabled");
+    #else
+    touch.setEnabled(false);
+    Serial.println("[TOUCH] TTP223 disabled (using button simulation)");
+    #endif
+    
+    Serial.println("[INIT] System ready!");
+    Serial.println("Try: Shake device, " + String(TOUCH_ENABLED ? "Touch sensor" : "Click button"));
+    Serial.println("========================================\n");
 }
 
 // ============================================================================
 // MAIN LOOP
 // ============================================================================
+
 void loop() {
-    unsigned long currentTime = millis();
+    // Update all systems
+    input.update();
+    motion.update();
     
-    // Auto-switch demo modes
-    if (currentTime - lastDemoSwitch >= DEMO_DURATION) {
-        lastDemoSwitch = currentTime;
-        
-        // Cycle through demos
-        switch (currentDemo) {
-            case DemoMode::TEXT_DEMO:
-                currentDemo = DemoMode::BITMAP_DEMO;
-                break;
-            case DemoMode::BITMAP_DEMO:
-                currentDemo = DemoMode::UI_DEMO;
-                break;
-            case DemoMode::UI_DEMO:
-                currentDemo = DemoMode::ANIMATION_DEMO;
-                break;
-            case DemoMode::ANIMATION_DEMO:
-                currentDemo = DemoMode::TEXT_DEMO;
-                break;
-        }
-        
-        Serial.printf("[DEMO] Switching to mode %d\n", (int)currentDemo);
-    }
+    #if TOUCH_ENABLED
+    touch.update();
+    #endif
     
-    // Run current demo
-    runCurrentDemo();
+    // Get current acceleration data
+    motion.getAcceleration(accelX, accelY, accelZ);
     
-    delay(100);  // Small delay for stability
-}
-
-// ============================================================================
-// DEMO FUNCTIONS
-// ============================================================================
-
-void runCurrentDemo() {
-    switch (currentDemo) {
-        case DemoMode::TEXT_DEMO:
-            demoText();
-            break;
-        case DemoMode::BITMAP_DEMO:
-            demoBitmap();
-            break;
-        case DemoMode::UI_DEMO:
-            demoUI();
-            break;
-        case DemoMode::ANIMATION_DEMO:
-            demoAnimation();
-            break;
+    // Update display every 100ms
+    static unsigned long lastDisplayUpdate = 0;
+    if (millis() - lastDisplayUpdate >= 100) {
+        lastDisplayUpdate = millis();
+        updateDisplay();
     }
 }
 
-void demoText() {
-    static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate < 1000) return;  // Update every 1 second
-    lastUpdate = millis();
-    
+// ============================================================================
+// DISPLAY UPDATE
+// ============================================================================
+
+void updateDisplay() {
     display.clear();
     
     // Title
-    display.drawText("TEXT DEMO", 64, 0, 1, TextAlign::CENTER);
+    display.drawText("MOTION+TOUCH", 64, 0, 1, TextAlign::CENTER);
     
-    // Different sizes
-    display.showTextCentered("Size 1", 12, 1);
-    display.showTextCentered("Size 2", 24, 2);
+    // Touch events
+    display.drawText("Touch:", 0, 12, 1);
+    display.drawText(lastTouchEvent.c_str(), 40, 12, 1);
     
-    // Alignment test
-    display.drawText("Left", 0, 48, 1, TextAlign::LEFT);
-    display.drawText("Center", 64, 48, 1, TextAlign::CENTER);
-    display.drawText("Right", 127, 48, 1, TextAlign::RIGHT);
+    // Motion events
+    display.drawText("Motion:", 0, 22, 1);
+    display.drawText(lastMotionEvent.c_str(), 45, 22, 1);
     
-    display.update();
-}
-
-void demoBitmap() {
-    static unsigned long lastUpdate = 0;
-    static bool showIdle = true;
+    // Statistics
+    char stats[32];
+    snprintf(stats, sizeof(stats), "T:%d D:%d S:%d", tapCount, doubleTapCount, shakeCount);
+    display.drawText(stats, 0, 34, 1);
     
-    if (millis() - lastUpdate < 1000) return;  // Switch every 1 second
-    lastUpdate = millis();
-    showIdle = !showIdle;
-    
-    display.clear();
-    display.drawText("BITMAP DEMO", 64, 0, 1, TextAlign::CENTER);
-    
-    // Show alternating bitmaps
-    if (showIdle) {
-        display.drawBitmapCentered(bitmap_idle, 32, 32);
-        display.drawText("Idle", 64, 56, 1, TextAlign::CENTER);
-    } else {
-        display.drawBitmapCentered(bitmap_tap, 32, 32);
-        display.drawText("Tap!", 64, 56, 1, TextAlign::CENTER);
+    // Orientation
+    Orientation orient = motion.getOrientation();
+    const char* orientText = "?";
+    switch (orient) {
+        case Orientation::FLAT: orientText = "FLAT"; break;
+        case Orientation::UPSIDE_DOWN: orientText = "UPSIDE"; break;
+        case Orientation::PORTRAIT: orientText = "PORTRT"; break;
+        case Orientation::LANDSCAPE_LEFT: orientText = "L-LEFT"; break;
+        case Orientation::LANDSCAPE_RIGHT: orientText = "L-RGHT"; break;
+        default: orientText = "?"; break;
     }
     
-    display.update();
-}
-
-void demoUI() {
-    static unsigned long lastUpdate = 0;
-    static float progress = 0.0f;
-    static int8_t battery = 100;
+    display.drawText("Orient:", 0, 46, 1);
+    display.drawText(orientText, 50, 46, 1);
     
-    if (millis() - lastUpdate < 100) return;
-    lastUpdate = millis();
-    
-    display.clear();
-    display.drawText("UI ELEMENTS", 64, 0, 1, TextAlign::CENTER);
-    
-    // Progress bar
-    display.drawText("Progress:", 0, 12, 1);
-    display.drawProgressBar(0, 22, 127, 8, progress);
-    
-    // Battery indicator
-    display.drawText("Battery:", 0, 36, 1);
-    display.drawBattery(60, 36, battery);
-    char battText[8];
-    snprintf(battText, sizeof(battText), "%d%%", battery);
-    display.drawText(battText, 90, 36, 1);
-    
-    // Menu boxes
-    display.drawText("Menu:", 0, 50, 1);
-    display.drawMenuBox(40, 48, 20, 12, true);   // Selected
-    display.drawMenuBox(65, 48, 20, 12, false);  // Unselected
-    display.drawMenuBox(90, 48, 20, 12, false);
+    // Status indicator
+    #if TOUCH_ENABLED
+    display.drawText("TTP223:ON", 0, 56, 1);
+    #else
+    display.drawText("BTN Mode", 0, 56, 1);
+    #endif
     
     display.update();
-    
-    // Animate values
-    progress += 0.02f;
-    if (progress > 1.0f) progress = 0.0f;
-    
-    battery -= 2;
-    if (battery < 0) battery = 100;
-}
-
-void demoAnimation() {
-    static unsigned long lastUpdate = 0;
-    static uint8_t frame = 0;
-    const uint8_t totalFrames = 8;
-    
-    if (millis() - lastUpdate < 200) return;  // 5 FPS
-    lastUpdate = millis();
-    
-    display.clear();
-    display.drawText("ANIMATION", 64, 0, 1, TextAlign::CENTER);
-    
-    // Show frame counter
-    char frameText[32];
-    snprintf(frameText, sizeof(frameText), "Frame %d/%d", frame + 1, totalFrames);
-    display.showTextCentered(frameText, 28, 2);
-    
-    display.update();
-    
-    frame = (frame + 1) % totalFrames;
 }
