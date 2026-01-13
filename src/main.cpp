@@ -38,15 +38,8 @@ enum class AppMode {
 AppMode currentMode = AppMode::ANIMATIONS;
 
 // ============================================================================
-// ANIMATION STATE - Simple & Clean
+// TIMING FOR NATURAL BEHAVIORS
 // ============================================================================
-enum class AnimationState {
-    IDLE_BASE,      // Showing static base frame
-    PLAYING         // Playing an animation
-};
-
-AnimationState animState = AnimationState::IDLE_BASE;
-
 // Timing for natural behaviors
 unsigned long lastBlinkTime = 0;
 unsigned long nextBlinkDelay = 5000;  // Next blink in 5 seconds
@@ -105,9 +98,7 @@ void onButtonEvent(ButtonEvent event);
 void onTouchEvent(TouchEvent event);
 void onMotionEvent(MotionEvent event);
 
-void updateAnimationBehaviors();
-void playAnimation(AnimState anim, bool forceLoop = false);
-void returnToBaseFrame();
+void checkRandomAnimations();
 void scheduleNextBlink();
 void scheduleNextWinkCheck();
 
@@ -124,7 +115,7 @@ void checkMenuTimeout();
 // ============================================================================
 
 void setup() {
-    Serial.begin(SERIAL_BAUD_RATE);
+    Serial.begin(115200);
     delay(1000);
     
     Serial.println("\n========================================");
@@ -139,12 +130,9 @@ void setup() {
     
     // Initialize animation engine
     animator.init();
-    animator.setAutoReturnToIdle(false);  // We'll manage state ourselves
-    
-    // Start with base frame (idle frame 0, paused)
-    animator.play(AnimState::IDLE);
-    animator.pauseOnFrame(0);
-    animState = AnimationState::IDLE_BASE;
+
+    // Start with static base frame (idle frame 0)
+    animator.showStaticFrame(AnimState::IDLE, 0);
     
     // Initialize sensors
     sensors.init(DHT11_PIN, SOUND_SENSOR_PIN, POTENTIOMETER_PIN);
@@ -207,20 +195,14 @@ void loop() {
     #endif
     
     animator.update();
-    
-    // Update animation behaviors (only in animation mode)
-    if (currentMode == AppMode::ANIMATIONS) {
-        updateAnimationBehaviors();
-        
-        // Check if shaking stopped
-        if (isShaking && (currentTime - lastShakeTime > SHAKE_COOLDOWN)) {
-            Serial.println("[ANIM] Shake stopped");
-            isShaking = false;
-            // Don't force stop - let dizzy finish current loop
-            // It will return to base automatically
-        }
+
+    // Check if shaking stopped
+    if (isShaking && (currentTime - lastShakeTime > SHAKE_COOLDOWN)) {
+        Serial.println("[SHAKE] Stopped - finishing current cycle");
+        isShaking = false;
+        animator.stopLoopingGracefully();  // Will finish current cycle then stop
     }
-    
+
     // Update current mode
     switch (currentMode) {
         case AppMode::ANIMATIONS:
@@ -242,62 +224,40 @@ void loop() {
 }
 
 // ============================================================================
-// ANIMATION BEHAVIOR LOGIC
+// RANDOM ANIMATION LOGIC
 // ============================================================================
 
-void updateAnimationBehaviors() {
+void checkRandomAnimations() {
     unsigned long currentTime = millis();
-    
-    // If currently playing an animation
-    if (animState == AnimationState::PLAYING) {
-        // Check if animation finished
-        if (!animator.isPlaying()) {
-            // If we're NOT shaking anymore, return to base
-            if (!isShaking) {
-                Serial.println("[ANIM] Animation complete, returning to base");
-                returnToBaseFrame();
-            } else {
-                // Still shaking - restart dizzy animation
-                Serial.println("[ANIM] Still shaking, looping dizzy");
-                animator.play(AnimState::DIZZY, true);
-            }
-        }
-        return;  // Don't trigger new animations while one is playing
-    }
-    
-    // We're at base frame - check for natural behaviors
-    if (animState == AnimationState::IDLE_BASE) {
-        // Check for scheduled blink
-        if (currentTime - lastBlinkTime >= nextBlinkDelay) {
-            Serial.println("[ANIM] Natural blink");
-            playAnimation(AnimState::IDLE);
-            lastBlinkTime = currentTime;
-            scheduleNextBlink();
-            return;
-        }
-        
-        // Check for wink (easter egg)
-        if (currentTime - lastWinkCheck >= nextWinkDelay) {
-            if (random(100) < 30) {  // 30% chance
-                Serial.println("[ANIM] Easter egg wink!");
-                playAnimation(AnimState::WINK);  // Using HAPPY for wink
-            }
-            lastWinkCheck = currentTime;
-            scheduleNextWinkCheck();
-        }
-    }
-}
 
-void playAnimation(AnimState anim, bool forceLoop) {
-    animator.play(anim, true, forceLoop);
-    animState = AnimationState::PLAYING;
-}
+    // Don't interrupt running animations
+    if (animator.isPlaying()) {
+        return;
+    }
 
-void returnToBaseFrame() {
-    animator.play(AnimState::IDLE);
-    animator.pauseOnFrame(0);
-    animState = AnimationState::IDLE_BASE;
-    Serial.println("[ANIM] Back to base frame");
+    // Don't run animations while shaking (dizzy handles it)
+    if (isShaking) {
+        return;
+    }
+
+    // Check for scheduled blink
+    if (currentTime - lastBlinkTime >= nextBlinkDelay) {
+        Serial.println("[ANIM] Natural blink");
+        animator.play(AnimState::IDLE, true);  // Priority play
+        lastBlinkTime = currentTime;
+        scheduleNextBlink();
+        return;
+    }
+
+    // Check for wink (easter egg)
+    if (currentTime - lastWinkCheck >= nextWinkDelay) {
+        if (random(100) < 30) {  // 30% chance
+            Serial.println("[ANIM] Easter egg wink!");
+            animator.play(AnimState::WINK, true);
+        }
+        lastWinkCheck = currentTime;
+        scheduleNextWinkCheck();
+    }
 }
 
 void scheduleNextBlink() {
@@ -401,14 +361,14 @@ void onTouchEvent(TouchEvent event) {
     if (currentMode == AppMode::ANIMATIONS) {
         switch (event) {
             case TouchEvent::TAP:
-                if (animState == AnimationState::IDLE_BASE) {
-                    playAnimation(AnimState::SURPRISED);
+                if (!animator.isPlaying()) {
+                    animator.play(AnimState::SURPRISED, true);
                 }
                 break;
-                
+
             case TouchEvent::DOUBLE_TAP:
-                if (animState == AnimationState::IDLE_BASE) {
-                    playAnimation(AnimState::HAPPY);
+                if (!animator.isPlaying()) {
+                    animator.play(AnimState::WINK, true);  // Use wink for double tap
                 }
                 break;
                 
@@ -449,19 +409,22 @@ void onTouchEvent(TouchEvent event) {
 void onMotionEvent(MotionEvent event) {
     if (event == MotionEvent::SHAKE) {
         lastShakeTime = millis();
-        
+
         if (currentMode == AppMode::ANIMATIONS) {
-            if (!isShaking) {
-                Serial.println("[SHAKE] Started - playing dizzy");
+            // Only start dizzy if not already playing it
+            if (!isShaking && animator.getCurrentState() != AnimState::DIZZY) {
+                Serial.println("[SHAKE] Started - playing dizzy loop");
                 isShaking = true;
-                playAnimation(AnimState::DIZZY, false);  // Don't force loop
+                // Start continuous dizzy loop
+                animator.play(AnimState::DIZZY, true, true);  // priority, forceLoop
             } else {
-                Serial.println("[SHAKE] Continues");
+                // Already playing dizzy - just update shake time
+                isShaking = true;
             }
-            
+
         } else if (currentMode == AppMode::MENU) {
             resetMenuTimeout();
-            
+
             if (menuSystem.isAtRoot()) {
                 currentMode = AppMode::ANIMATIONS;
             } else {
@@ -484,6 +447,8 @@ void checkMenuTimeout() {
     if (millis() - lastMenuActivity > MENU_TIMEOUT_MS) {
         Serial.println("[MENU] Timeout - returning to animations");
         currentMode = AppMode::ANIMATIONS;
+        // Show base frame immediately
+        animator.showStaticFrame(AnimState::IDLE, 0);
     }
 }
 
@@ -500,13 +465,13 @@ void onMenuStateChange(MenuItem* item) {
     
     if (strcmp(itemText, "Idle Blink") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        playAnimation(AnimState::IDLE);
+        animator.play(AnimState::IDLE, true);
     } else if (strcmp(itemText, "Wink") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        playAnimation(AnimState::WINK);
+        animator.play(AnimState::WINK, true);
     } else if (strcmp(itemText, "Dizzy") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        playAnimation(AnimState::DIZZY);
+        animator.play(AnimState::DIZZY, true);
     } else if (strcmp(itemText, "Temp/Humidity") == 0 ||
                strcmp(itemText, "Sound Level") == 0 ||
                strcmp(itemText, "Potentiometer") == 0) {
@@ -544,6 +509,22 @@ void updateMenuMode() {
 }
 
 void updateAnimationsMode() {
+    static bool wasPlaying = false;
+    bool isPlaying = animator.isPlaying();
+
+    // If animation just stopped, immediately show base frame
+    if (wasPlaying && !isPlaying && !isShaking) {
+        animator.showStaticFrame(AnimState::IDLE, 0);
+        Serial.println("[ANIM] Transition to base frame");
+    }
+    wasPlaying = isPlaying;
+
+    // Check for random animations (blink, wink)
+    if (!isPlaying && !isShaking) {
+        checkRandomAnimations();
+    }
+
+    // Always clear and redraw
     display.clear();
     animator.draw();
     display.drawText("Hold=Menu", 64, 56, 1, TextAlign::CENTER);

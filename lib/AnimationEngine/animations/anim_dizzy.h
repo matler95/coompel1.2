@@ -516,7 +516,7 @@ const float dizzy_frame_delays[] PROGMEM = {
 // Animation structure
 const Animation anim_dizzy = {
     .frames = dizzy_frames,
-    .frameCount = 14,
+    .frameCount = 13,
     .width = 128,
     .height = 64,
     .fps = 0,

@@ -26,7 +26,8 @@ AnimationEngine::AnimationEngine(DisplayManager* display)
       _playing(false),
       _paused(false),
       _autoReturnToIdle(true),
-      _forceLoop(false) 
+      _forceLoop(false),
+      _continuousLoop(false)
 {
     // Initialize animation registry
     for (uint8_t i = 0; i < 8; i++) {
@@ -77,11 +78,12 @@ void AnimationEngine::play(AnimState state, bool priority, bool forceLoop) {
     _lastFrameTime = millis();
     _playing = true;
     _paused = false;
-    _forceLoop = forceLoop;  // ⭐ NEW: Store forced loop state
-    
-    Serial.printf("[ANIM] Playing: %s (%d frames @ %d FPS)%s\n", 
-                  anim->name, anim->frameCount, anim->fps,
-                  forceLoop ? " [FORCED LOOP]" : "");
+    _forceLoop = forceLoop;
+    _continuousLoop = forceLoop;  // Track if we should keep looping
+
+    Serial.printf("[ANIM] Playing: %s (%d frames)%s\n",
+                  anim->name, anim->frameCount,
+                  forceLoop ? " [CONTINUOUS LOOP]" : "");
 }
 
 void AnimationEngine::stop() {
@@ -134,15 +136,16 @@ void AnimationEngine::draw() {
 
 void AnimationEngine::advanceFrame() {
     if (_currentAnimation == nullptr) return;
-    
+
     _currentFrame++;
-    
+
     // Check if animation complete
     if (_currentFrame >= _currentAnimation->frameCount) {
-        Serial.printf("[ANIM] End of frames. Loop:%d ForceLoop:%d\n", 
-                      _currentAnimation->loop, _forceLoop);
-        
-        if (_currentAnimation->loop || _forceLoop) {
+        Serial.printf("[ANIM] End of frames. Loop:%d ContinuousLoop:%d\n",
+                      _currentAnimation->loop, _continuousLoop);
+
+        // Check if should loop
+        if (_currentAnimation->loop || _continuousLoop) {
             // Loop back to start
             _currentFrame = 0;
             Serial.println("[ANIM] Looping to frame 0");
@@ -158,19 +161,14 @@ void AnimationEngine::advanceFrame() {
 
 void AnimationEngine::onAnimationComplete() {
     Serial.printf("[ANIM] Animation complete: %s\n", _currentAnimation->name);
-    
-    // Check if forced to loop
-    if (_forceLoop) {
-        _currentFrame = 0;  // Restart from beginning
-        return;
-    }
-    
-    if (_autoReturnToIdle && _currentState != AnimState::IDLE) {
-        // Return to idle after non-looping animation
-        play(AnimState::IDLE);
-    } else {
-        _playing = false;
-    }
+
+    // Stop playing - animation is done
+    _playing = false;
+    _continuousLoop = false;
+    _forceLoop = false;
+
+    // Don't auto-return to idle - main loop will handle showing base frame
+    // This prevents double animation triggers
 }
 
 uint16_t AnimationEngine::getFrameDelay() {
@@ -226,5 +224,30 @@ void AnimationEngine::stopForcedLoop() {
         Serial.println("[ANIM] Stopping forced loop");
         _forceLoop = false;
         // Animation will finish current cycle and stop
+    }
+}
+
+void AnimationEngine::showStaticFrame(AnimState state, uint8_t frameIndex) {
+    const Animation* anim = getAnimation(state);
+    if (anim == nullptr || frameIndex >= anim->frameCount) {
+        return;
+    }
+
+    _currentState = state;
+    _currentAnimation = anim;
+    _currentFrame = frameIndex;
+    _playing = false;  // Not animating
+    _paused = false;
+    _continuousLoop = false;
+    _forceLoop = false;
+
+    Serial.printf("[ANIM] Static frame: %s[%d]\n", anim->name, frameIndex);
+}
+
+void AnimationEngine::stopLoopingGracefully() {
+    if (_continuousLoop) {
+        Serial.println("[ANIM] Will stop looping after current cycle");
+        _continuousLoop = false;
+        // Animation will finish current cycle and stop naturally
     }
 }

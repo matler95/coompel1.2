@@ -145,6 +145,18 @@ public:
      */
     void stopForcedLoop();
 
+    /**
+     * @brief Display a specific frame as static image
+     * @param state Animation to use
+     * @param frameIndex Frame to display
+     */
+    void showStaticFrame(AnimState state, uint8_t frameIndex);
+
+    /**
+     * @brief Stop continuous looping after current cycle completes
+     */
+    void stopLoopingGracefully();
+
 
 private:
     DisplayManager* _display;
@@ -170,7 +182,8 @@ private:
     void advanceFrame();
     void onAnimationComplete();
     uint16_t getFrameDelay();
-    bool _forceLoop;  
+    bool _forceLoop;
+    bool _continuousLoop;  // Keep looping until explicitly stopped
 };
 
 #endif // ANIMATION_ENGINE_H
