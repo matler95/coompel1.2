@@ -22,7 +22,7 @@
 // ============================================================================
 enum class AnimState {
     IDLE,           // Default resting state
-    HAPPY,          // Excited/positive emotion
+    WINK,           // positive emotion
     SURPRISED,      // Sudden reaction (tap)
     DIZZY,          // Confused/shaken
     SLEEPING,       // Low power mode
@@ -35,13 +35,14 @@ enum class AnimState {
 // ANIMATION STRUCTURE
 // ============================================================================
 struct Animation {
-    const uint8_t* const* frames;  // Array of bitmap frame pointers (FIXED)
-    uint8_t frameCount;            // Number of frames in animation
-    uint8_t width;                 // Frame width in pixels
-    uint8_t height;                // Frame height in pixels
-    uint8_t fps;                   // Playback speed (frames per second)
-    bool loop;                     // True if animation loops
-    const char* name;              // Animation name for debugging
+    const uint8_t* const* frames;   // Array of bitmap frame pointers
+    uint8_t frameCount;             // Number of frames in animation
+    uint8_t width;                  // Frame width in pixels
+    uint8_t height;                 // Frame height in pixels
+    uint8_t fps;                    // Playback speed (frames per second) - FALLBACK
+    bool loop;                      // True if animation loops
+    const char* name;               // Animation name for debugging
+    const float* frameDelays;       // Per-frame delays in seconds (NULL = use fps) ⭐ NEW
 };
 
 // ============================================================================
@@ -125,6 +126,12 @@ public:
      * @param animation Pointer to Animation structure
      */
     void registerAnimation(AnimState state, const Animation* animation);
+    
+    /**
+     * @brief Get current animation info
+     * @return Pointer to current Animation structure
+     */
+    const Animation* getCurrentAnimation() const { return _currentAnimation; }
 
 private:
     DisplayManager* _display;

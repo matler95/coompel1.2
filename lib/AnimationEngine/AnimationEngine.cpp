@@ -7,7 +7,7 @@
 
 // Include animation data
 #include "animations/anim_idle.h"
-#include "animations/anim_happy.h"
+#include "animations/anim_wink.h"
 #include "animations/anim_surprised.h"
 #include "animations/anim_dizzy.h"
 
@@ -38,7 +38,7 @@ void AnimationEngine::init() {
     
     // Register built-in animations
     registerAnimation(AnimState::IDLE, &anim_idle);
-    registerAnimation(AnimState::HAPPY, &anim_happy);
+    registerAnimation(AnimState::WINK, &anim_wink);
     registerAnimation(AnimState::SURPRISED, &anim_surprised);
     registerAnimation(AnimState::DIZZY, &anim_dizzy);
     
@@ -159,6 +159,14 @@ void AnimationEngine::onAnimationComplete() {
 }
 
 uint16_t AnimationEngine::getFrameDelay() {
+    // Check if animation has per-frame delays
+    if (_currentAnimation->frameDelays != nullptr) {
+        // Use specific delay for current frame
+        float delaySeconds = pgm_read_float(&_currentAnimation->frameDelays[_currentFrame]);
+        return (uint16_t)(delaySeconds * 1000.0f);  // Convert to milliseconds
+    }
+    
+    // Fall back to FPS-based timing
     uint8_t fps = _globalFPS > 0 ? _globalFPS : _currentAnimation->fps;
     return 1000 / fps;
 }

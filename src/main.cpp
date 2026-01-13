@@ -70,8 +70,8 @@ MenuItem soundItem("Sound", 1, 0, 1);
 MenuItem sensitivityItem("Sensitivity", 5, 1, 10);
 MenuItem aboutItem("About");
 
-MenuItem idleAnimItem("Idle Face");
-MenuItem happyAnimItem("Happy");
+MenuItem idleAnimItem("idle");
+MenuItem winkAnimItem("wink");
 MenuItem surprisedAnimItem("Surprised");
 MenuItem dizzyAnimItem("Dizzy");
 
@@ -209,12 +209,12 @@ void setupMenu() {
     mainMenu.addChild(&settingsMenu);
     
     idleAnimItem.setType(MenuItemType::ACTION);
-    happyAnimItem.setType(MenuItemType::ACTION);
+    winkAnimItem.setType(MenuItemType::ACTION);
     surprisedAnimItem.setType(MenuItemType::ACTION);
     dizzyAnimItem.setType(MenuItemType::ACTION);
     
     animationsMenu.addChild(&idleAnimItem);
-    animationsMenu.addChild(&happyAnimItem);
+    animationsMenu.addChild(&winkAnimItem);
     animationsMenu.addChild(&surprisedAnimItem);
     animationsMenu.addChild(&dizzyAnimItem);
     
@@ -318,7 +318,7 @@ void onTouchEvent(TouchEvent event) {
                 break;
                 
             case TouchEvent::DOUBLE_TAP:
-                animator.play(AnimState::HAPPY, true);
+                animator.play(AnimState::WINK, true);
                 break;
                 
             case TouchEvent::LONG_TOUCH:
@@ -384,12 +384,12 @@ void onMenuStateChange(MenuItem* item) {
     const char* itemText = item->getText();
     
     // Handle menu selections
-    if (strcmp(itemText, "Idle Face") == 0) {
+    if (strcmp(itemText, "idle") == 0) {
         currentMode = AppMode::ANIMATIONS;
         animator.play(AnimState::IDLE);
-    } else if (strcmp(itemText, "Happy") == 0) {
+    } else if (strcmp(itemText, "wink") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        animator.play(AnimState::HAPPY);
+        animator.play(AnimState::WINK);
     } else if (strcmp(itemText, "Surprised") == 0) {
         currentMode = AppMode::ANIMATIONS;
         animator.play(AnimState::SURPRISED);
@@ -437,7 +437,12 @@ void updateMenuMode() {
 void updateAnimationsMode() {
     display.clear();
     animator.draw();
-    display.drawText("Hold=Menu", 64, 56, 1, TextAlign::CENTER);
+    
+    // Only show hint for small animations
+    if (animator.getCurrentAnimation()->width < 100) {
+        display.drawText("Tap/Shake me!", 64, 56, 1, TextAlign::CENTER);
+    }
+    
     display.update();
 }
 
