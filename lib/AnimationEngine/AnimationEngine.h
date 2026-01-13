@@ -71,8 +71,9 @@ public:
      * @brief Play specific animation state
      * @param state AnimState to play
      * @param priority If true, interrupt current animation
+     * @param forceLoop Override animation's loop setting
      */
-    void play(AnimState state, bool priority = false);
+    void play(AnimState state, bool priority = false, bool forceLoop = false);    
     
     /**
      * @brief Stop current animation
@@ -133,6 +134,18 @@ public:
      */
     const Animation* getCurrentAnimation() const { return _currentAnimation; }
 
+    /**
+     * @brief Pause animation and optionally jump to specific frame
+     * @param frameIndex Frame to pause on (default: current frame)
+     */
+    void pauseOnFrame(uint8_t frameIndex);
+
+    /**
+     * @brief Stop forced looping and let animation finish naturally
+     */
+    void stopForcedLoop();
+
+
 private:
     DisplayManager* _display;
     
@@ -157,6 +170,7 @@ private:
     void advanceFrame();
     void onAnimationComplete();
     uint16_t getFrameDelay();
+    bool _forceLoop;  
 };
 
 #endif // ANIMATION_ENGINE_H

@@ -1,9 +1,7 @@
 /**
  * @file main.cpp
- * @brief ESP32-C3 Interactive Device - Analog Menu Navigation
- * @version 0.7.0
- * 
- * Phase 7: Smooth potentiometer-based menu navigation
+ * @brief ESP32-C3 Interactive Device
+ * @version 0.9.0
  */
 
 #include <Arduino.h>
@@ -31,14 +29,38 @@ SensorHub sensors;
 // APPLICATION STATE
 // ============================================================================
 enum class AppMode {
-    MENU,
     ANIMATIONS,
+    MENU,
     SENSORS,
-    MOTION_TEST,
-    GAME
+    MOTION_TEST
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
+
+// ============================================================================
+// ANIMATION STATE - Simple & Clean
+// ============================================================================
+enum class AnimationState {
+    IDLE_BASE,      // Showing static base frame
+    PLAYING         // Playing an animation
+};
+
+AnimationState animState = AnimationState::IDLE_BASE;
+
+// Timing for natural behaviors
+unsigned long lastBlinkTime = 0;
+unsigned long nextBlinkDelay = 5000;  // Next blink in 5 seconds
+unsigned long lastWinkCheck = 0;
+unsigned long nextWinkDelay = 20000;  // Check for wink in 20 seconds
+
+// Shake detection
+bool isShaking = false;
+unsigned long lastShakeTime = 0;
+const unsigned long SHAKE_COOLDOWN = 1000;  // 1 second
+
+// Menu timeout
+unsigned long lastMenuActivity = 0;
+const unsigned long MENU_TIMEOUT_MS = 10000;  // 10 seconds
 
 // ============================================================================
 // SETTINGS
@@ -47,12 +69,10 @@ struct Settings {
     uint8_t brightness;
     bool soundEnabled;
     uint8_t motionSensitivity;
-    bool autoSleep;
 } settings = {
     .brightness = 255,
     .soundEnabled = true,
-    .motionSensitivity = 5,
-    .autoSleep = true
+    .motionSensitivity = 5
 };
 
 // ============================================================================
@@ -62,17 +82,14 @@ MenuItem mainMenu("Main Menu");
 MenuItem animationsMenu("Animations");
 MenuItem sensorsMenu("Sensors");
 MenuItem motionTestMenu("Motion Test");
-MenuItem gamesMenu("Games");
 MenuItem settingsMenu("Settings");
 
 MenuItem brightnessItem("Brightness", 255, 0, 255);
 MenuItem soundItem("Sound", 1, 0, 1);
 MenuItem sensitivityItem("Sensitivity", 5, 1, 10);
-MenuItem aboutItem("About");
 
-MenuItem idleAnimItem("idle");
-MenuItem winkAnimItem("wink");
-MenuItem surprisedAnimItem("Surprised");
+MenuItem idleAnimItem("Idle Blink");
+MenuItem winkAnimItem("Wink");
 MenuItem dizzyAnimItem("Dizzy");
 
 MenuItem tempHumidItem("Temp/Humidity");
@@ -88,10 +105,19 @@ void onButtonEvent(ButtonEvent event);
 void onTouchEvent(TouchEvent event);
 void onMotionEvent(MotionEvent event);
 
-void updateMenuMode();
+void updateAnimationBehaviors();
+void playAnimation(AnimState anim, bool forceLoop = false);
+void returnToBaseFrame();
+void scheduleNextBlink();
+void scheduleNextWinkCheck();
+
 void updateAnimationsMode();
+void updateMenuMode();
 void updateSensorsMode();
 void updateMotionTestMode();
+
+void resetMenuTimeout();
+void checkMenuTimeout();
 
 // ============================================================================
 // SETUP
@@ -102,8 +128,7 @@ void setup() {
     delay(1000);
     
     Serial.println("\n========================================");
-    Serial.println("ESP32-C3 Interactive Device v0.7.0");
-    Serial.println("Phase 7: Analog Menu Navigation");
+    Serial.println("ESP32-C3 Interactive Device v0.9.0");
     Serial.println("========================================\n");
     
     // Initialize display
@@ -114,6 +139,12 @@ void setup() {
     
     // Initialize animation engine
     animator.init();
+    animator.setAutoReturnToIdle(false);  // We'll manage state ourselves
+    
+    // Start with base frame (idle frame 0, paused)
+    animator.play(AnimState::IDLE);
+    animator.pauseOnFrame(0);
+    animState = AnimationState::IDLE_BASE;
     
     // Initialize sensors
     sensors.init(DHT11_PIN, SOUND_SENSOR_PIN, POTENTIOMETER_PIN);
@@ -143,21 +174,20 @@ void setup() {
     
     // Setup menu
     setupMenu();
-    menuSystem.setAnalogDeadzone(3);  // 3% deadzone for smooth scrolling
-    
+    menuSystem.setAnalogDeadzone(3);
     display.setBrightness(settings.brightness);
     
-    Serial.println("\n[INIT] System ready!");
-    Serial.println("===========================================");
-    Serial.println("NAVIGATION:");
-    Serial.println("  Potentiometer → Scroll menu");
-    Serial.println("  Click → Select/Confirm");
-    Serial.println("  Long Press → Go Back");
-    Serial.println("  Shake → Go Back (in menu)");
-    Serial.println("===========================================\n");
+    // Schedule first behaviors
+    scheduleNextBlink();
+    scheduleNextWinkCheck();
     
-    // Start with idle animation
-    animator.play(AnimState::IDLE);
+    Serial.println("\n[INIT] System ready!");
+    Serial.println("Natural behaviors:");
+    Serial.println("  - Random blinks");
+    Serial.println("  - Rare winks (easter egg)");
+    Serial.println("  - Shake = dizzy loop");
+    Serial.println("  - Menu timeout: 10s");
+    Serial.println("========================================\n");
 }
 
 // ============================================================================
@@ -165,6 +195,8 @@ void setup() {
 // ============================================================================
 
 void loop() {
+    unsigned long currentTime = millis();
+    
     // Update all systems
     input.update();
     motion.update();
@@ -176,13 +208,27 @@ void loop() {
     
     animator.update();
     
+    // Update animation behaviors (only in animation mode)
+    if (currentMode == AppMode::ANIMATIONS) {
+        updateAnimationBehaviors();
+        
+        // Check if shaking stopped
+        if (isShaking && (currentTime - lastShakeTime > SHAKE_COOLDOWN)) {
+            Serial.println("[ANIM] Shake stopped");
+            isShaking = false;
+            // Don't force stop - let dizzy finish current loop
+            // It will return to base automatically
+        }
+    }
+    
     // Update current mode
     switch (currentMode) {
-        case AppMode::MENU:
-            updateMenuMode();
-            break;
         case AppMode::ANIMATIONS:
             updateAnimationsMode();
+            break;
+        case AppMode::MENU:
+            updateMenuMode();
+            checkMenuTimeout();
             break;
         case AppMode::SENSORS:
             updateSensorsMode();
@@ -190,11 +236,78 @@ void loop() {
         case AppMode::MOTION_TEST:
             updateMotionTestMode();
             break;
-        case AppMode::GAME:
-            break;
     }
     
     delay(10);
+}
+
+// ============================================================================
+// ANIMATION BEHAVIOR LOGIC
+// ============================================================================
+
+void updateAnimationBehaviors() {
+    unsigned long currentTime = millis();
+    
+    // If currently playing an animation
+    if (animState == AnimationState::PLAYING) {
+        // Check if animation finished
+        if (!animator.isPlaying()) {
+            // If we're NOT shaking anymore, return to base
+            if (!isShaking) {
+                Serial.println("[ANIM] Animation complete, returning to base");
+                returnToBaseFrame();
+            } else {
+                // Still shaking - restart dizzy animation
+                Serial.println("[ANIM] Still shaking, looping dizzy");
+                animator.play(AnimState::DIZZY, true);
+            }
+        }
+        return;  // Don't trigger new animations while one is playing
+    }
+    
+    // We're at base frame - check for natural behaviors
+    if (animState == AnimationState::IDLE_BASE) {
+        // Check for scheduled blink
+        if (currentTime - lastBlinkTime >= nextBlinkDelay) {
+            Serial.println("[ANIM] Natural blink");
+            playAnimation(AnimState::IDLE);
+            lastBlinkTime = currentTime;
+            scheduleNextBlink();
+            return;
+        }
+        
+        // Check for wink (easter egg)
+        if (currentTime - lastWinkCheck >= nextWinkDelay) {
+            if (random(100) < 30) {  // 30% chance
+                Serial.println("[ANIM] Easter egg wink!");
+                playAnimation(AnimState::WINK);  // Using HAPPY for wink
+            }
+            lastWinkCheck = currentTime;
+            scheduleNextWinkCheck();
+        }
+    }
+}
+
+void playAnimation(AnimState anim, bool forceLoop) {
+    animator.play(anim, true, forceLoop);
+    animState = AnimationState::PLAYING;
+}
+
+void returnToBaseFrame() {
+    animator.play(AnimState::IDLE);
+    animator.pauseOnFrame(0);
+    animState = AnimationState::IDLE_BASE;
+    Serial.println("[ANIM] Back to base frame");
+}
+
+void scheduleNextBlink() {
+    nextBlinkDelay = random(3000, 8000);  // 3-8 seconds
+    Serial.printf("[ANIM] Next blink in %lu ms\n", nextBlinkDelay);
+}
+
+void scheduleNextWinkCheck() {
+    nextWinkDelay = random(15000, 45000);  // 15-45 seconds
+    Serial.printf("[ANIM] Next wink check in %lu ms\n", nextWinkDelay);
 }
 
 // ============================================================================
@@ -205,17 +318,14 @@ void setupMenu() {
     mainMenu.addChild(&animationsMenu);
     mainMenu.addChild(&sensorsMenu);
     mainMenu.addChild(&motionTestMenu);
-    mainMenu.addChild(&gamesMenu);
     mainMenu.addChild(&settingsMenu);
     
     idleAnimItem.setType(MenuItemType::ACTION);
     winkAnimItem.setType(MenuItemType::ACTION);
-    surprisedAnimItem.setType(MenuItemType::ACTION);
     dizzyAnimItem.setType(MenuItemType::ACTION);
     
     animationsMenu.addChild(&idleAnimItem);
     animationsMenu.addChild(&winkAnimItem);
-    animationsMenu.addChild(&surprisedAnimItem);
     animationsMenu.addChild(&dizzyAnimItem);
     
     tempHumidItem.setType(MenuItemType::ACTION);
@@ -227,7 +337,6 @@ void setupMenu() {
     sensorsMenu.addChild(&potValueItem);
     
     motionTestMenu.setType(MenuItemType::ACTION);
-    gamesMenu.setType(MenuItemType::INFO);
     
     brightnessItem.setType(MenuItemType::VALUE);
     brightnessItem.setValue(settings.brightness);
@@ -235,12 +344,10 @@ void setupMenu() {
     soundItem.setValue(settings.soundEnabled ? 1 : 0);
     sensitivityItem.setType(MenuItemType::VALUE);
     sensitivityItem.setValue(settings.motionSensitivity);
-    aboutItem.setType(MenuItemType::ACTION);
     
     settingsMenu.addChild(&brightnessItem);
     settingsMenu.addChild(&soundItem);
     settingsMenu.addChild(&sensitivityItem);
-    settingsMenu.addChild(&aboutItem);
     
     menuSystem.init(&mainMenu);
     menuSystem.setStateCallback(onMenuStateChange);
@@ -252,48 +359,28 @@ void setupMenu() {
 
 void onButtonEvent(ButtonEvent event) {
     if (currentMode == AppMode::ANIMATIONS) {
-        // Animation mode
-        switch (event) {
-            case ButtonEvent::CLICK:
-                #if !TOUCH_ENABLED
-                // Enter menu
-                currentMode = AppMode::MENU;
-                menuSystem.draw();
-                Serial.println("[NAV] Entered menu");
-                #endif
-                break;
-                
-            case ButtonEvent::LONG_PRESS:
-                // Enter menu
-                currentMode = AppMode::MENU;
-                menuSystem.draw();
-                Serial.println("[NAV] Entered menu");
-                break;
-                
-            default:
-                break;
+        if (event == ButtonEvent::CLICK || event == ButtonEvent::LONG_PRESS) {
+            currentMode = AppMode::MENU;
+            resetMenuTimeout();
+            menuSystem.draw();
+            Serial.println("[NAV] Entered menu");
         }
     } else if (currentMode == AppMode::MENU) {
-        // Menu mode - potentiometer scrolls, button confirms/backs
+        resetMenuTimeout();
+        
         switch (event) {
             case ButtonEvent::CLICK:
-                // Confirm/Select current item
                 menuSystem.navigate(MenuNav::SELECT);
                 menuSystem.draw();
-                Serial.println("[NAV] Item selected");
                 break;
                 
             case ButtonEvent::LONG_PRESS:
-                // Go back
                 if (menuSystem.isAtRoot()) {
-                    // Exit menu to animations
                     currentMode = AppMode::ANIMATIONS;
-                    animator.play(AnimState::IDLE);
                     Serial.println("[NAV] Exited menu");
                 } else {
                     menuSystem.navigate(MenuNav::BACK);
                     menuSystem.draw();
-                    Serial.println("[NAV] Back");
                 }
                 break;
                 
@@ -301,9 +388,9 @@ void onButtonEvent(ButtonEvent event) {
                 break;
         }
     } else {
-        // Other modes - long press to menu
         if (event == ButtonEvent::LONG_PRESS) {
             currentMode = AppMode::MENU;
+            resetMenuTimeout();
             menuSystem.draw();
         }
     }
@@ -314,15 +401,20 @@ void onTouchEvent(TouchEvent event) {
     if (currentMode == AppMode::ANIMATIONS) {
         switch (event) {
             case TouchEvent::TAP:
-                animator.play(AnimState::SURPRISED, true);
+                if (animState == AnimationState::IDLE_BASE) {
+                    playAnimation(AnimState::SURPRISED);
+                }
                 break;
                 
             case TouchEvent::DOUBLE_TAP:
-                animator.play(AnimState::WINK, true);
+                if (animState == AnimationState::IDLE_BASE) {
+                    playAnimation(AnimState::HAPPY);
+                }
                 break;
                 
             case TouchEvent::LONG_TOUCH:
                 currentMode = AppMode::MENU;
+                resetMenuTimeout();
                 menuSystem.draw();
                 break;
                 
@@ -330,6 +422,8 @@ void onTouchEvent(TouchEvent event) {
                 break;
         }
     } else if (currentMode == AppMode::MENU) {
+        resetMenuTimeout();
+        
         switch (event) {
             case TouchEvent::TAP:
                 menuSystem.navigate(MenuNav::SELECT);
@@ -339,7 +433,6 @@ void onTouchEvent(TouchEvent event) {
             case TouchEvent::LONG_TOUCH:
                 if (menuSystem.isAtRoot()) {
                     currentMode = AppMode::ANIMATIONS;
-                    animator.play(AnimState::IDLE);
                 } else {
                     menuSystem.navigate(MenuNav::BACK);
                     menuSystem.draw();
@@ -354,23 +447,43 @@ void onTouchEvent(TouchEvent event) {
 }
 
 void onMotionEvent(MotionEvent event) {
-    if (currentMode == AppMode::ANIMATIONS) {
-        if (event == MotionEvent::SHAKE) {
-            animator.play(AnimState::DIZZY, true);
-        }
-    } else if (currentMode == AppMode::MENU) {
-        if (event == MotionEvent::SHAKE) {
-            // Shake = go back in menu
+    if (event == MotionEvent::SHAKE) {
+        lastShakeTime = millis();
+        
+        if (currentMode == AppMode::ANIMATIONS) {
+            if (!isShaking) {
+                Serial.println("[SHAKE] Started - playing dizzy");
+                isShaking = true;
+                playAnimation(AnimState::DIZZY, false);  // Don't force loop
+            } else {
+                Serial.println("[SHAKE] Continues");
+            }
+            
+        } else if (currentMode == AppMode::MENU) {
+            resetMenuTimeout();
+            
             if (menuSystem.isAtRoot()) {
                 currentMode = AppMode::ANIMATIONS;
-                animator.play(AnimState::IDLE);
-                Serial.println("[NAV] Shake exit menu");
             } else {
                 menuSystem.navigate(MenuNav::BACK);
                 menuSystem.draw();
-                Serial.println("[NAV] Shake back");
             }
         }
+    }
+}
+
+// ============================================================================
+// MENU TIMEOUT
+// ============================================================================
+
+void resetMenuTimeout() {
+    lastMenuActivity = millis();
+}
+
+void checkMenuTimeout() {
+    if (millis() - lastMenuActivity > MENU_TIMEOUT_MS) {
+        Serial.println("[MENU] Timeout - returning to animations");
+        currentMode = AppMode::ANIMATIONS;
     }
 }
 
@@ -381,21 +494,19 @@ void onMotionEvent(MotionEvent event) {
 void onMenuStateChange(MenuItem* item) {
     if (item == nullptr) return;
     
+    resetMenuTimeout();
+    
     const char* itemText = item->getText();
     
-    // Handle menu selections
-    if (strcmp(itemText, "idle") == 0) {
+    if (strcmp(itemText, "Idle Blink") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        animator.play(AnimState::IDLE);
-    } else if (strcmp(itemText, "wink") == 0) {
+        playAnimation(AnimState::IDLE);
+    } else if (strcmp(itemText, "Wink") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        animator.play(AnimState::WINK);
-    } else if (strcmp(itemText, "Surprised") == 0) {
-        currentMode = AppMode::ANIMATIONS;
-        animator.play(AnimState::SURPRISED);
+        playAnimation(AnimState::WINK);
     } else if (strcmp(itemText, "Dizzy") == 0) {
         currentMode = AppMode::ANIMATIONS;
-        animator.play(AnimState::DIZZY);
+        playAnimation(AnimState::DIZZY);
     } else if (strcmp(itemText, "Temp/Humidity") == 0 ||
                strcmp(itemText, "Sound Level") == 0 ||
                strcmp(itemText, "Potentiometer") == 0) {
@@ -404,7 +515,6 @@ void onMenuStateChange(MenuItem* item) {
         currentMode = AppMode::MOTION_TEST;
     }
     
-    // Handle settings
     if (strcmp(itemText, "Brightness") == 0) {
         settings.brightness = item->getValue();
         display.setBrightness(settings.brightness);
@@ -424,8 +534,7 @@ void onMenuStateChange(MenuItem* item) {
 void updateMenuMode() {
     static unsigned long lastUpdate = 0;
     
-    // Update menu navigation with potentiometer (smooth analog scrolling!)
-    if (millis() - lastUpdate >= 50) {  // 20 Hz update rate
+    if (millis() - lastUpdate >= 50) {
         lastUpdate = millis();
         
         uint16_t potValue = sensors.getPotValue();
@@ -437,12 +546,7 @@ void updateMenuMode() {
 void updateAnimationsMode() {
     display.clear();
     animator.draw();
-    
-    // Only show hint for small animations
-    if (animator.getCurrentAnimation()->width < 100) {
-        display.drawText("Tap/Shake me!", 64, 56, 1, TextAlign::CENTER);
-    }
-    
+    display.drawText("Hold=Menu", 64, 56, 1, TextAlign::CENTER);
     display.update();
 }
 
@@ -456,10 +560,8 @@ void updateSensorsMode() {
     display.showTextCentered("SENSORS", 0, 1);
     
     const SensorData& data = sensors.getData();
-    
     char buffer[32];
     
-    // Temperature & Humidity
     if (sensors.isDHTReady()) {
         if (data.dhtValid) {
             snprintf(buffer, sizeof(buffer), "Temp: %.1fC", data.temperature);
@@ -471,7 +573,6 @@ void updateSensorsMode() {
         }
     }
     
-    // Sound level
     if (sensors.isSoundReady()) {
         uint8_t soundPercent = sensors.getSoundPercent();
         snprintf(buffer, sizeof(buffer), "Sound: %d%%", soundPercent);
@@ -479,7 +580,6 @@ void updateSensorsMode() {
         display.drawProgressBar(0, 40, 127, 6, soundPercent / 100.0f);
     }
     
-    // Potentiometer
     if (sensors.isPotReady()) {
         snprintf(buffer, sizeof(buffer), "Pot: %d%%", data.potPercent);
         display.drawText(buffer, 0, 50, 1);
@@ -491,14 +591,6 @@ void updateSensorsMode() {
 
 void updateMotionTestMode() {
     static unsigned long lastUpdate = 0;
-    static String lastGesture = "None";
-    static unsigned long gestureTime = 0;
-    
-    MotionEvent event = motion.getEvent();
-    if (event == MotionEvent::SHAKE) {
-        lastGesture = "SHAKE!";
-        gestureTime = millis();
-    }
     
     if (millis() - lastUpdate < 100) return;
     lastUpdate = millis();
@@ -506,8 +598,8 @@ void updateMotionTestMode() {
     display.clear();
     display.showTextCentered("MOTION TEST", 0, 1);
     
-    if (millis() - gestureTime < 2000) {
-        display.showTextCentered(lastGesture.c_str(), 24, 2);
+    if (isShaking) {
+        display.showTextCentered("SHAKING!", 24, 2);
     } else {
         display.showTextCentered("Shake me!", 24, 1);
     }

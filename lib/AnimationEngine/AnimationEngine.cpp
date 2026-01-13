@@ -25,7 +25,8 @@ AnimationEngine::AnimationEngine(DisplayManager* display)
       _globalFPS(0),  // 0 = use animation's own FPS
       _playing(false),
       _paused(false),
-      _autoReturnToIdle(true)
+      _autoReturnToIdle(true),
+      _forceLoop(false) 
 {
     // Initialize animation registry
     for (uint8_t i = 0; i < 8; i++) {
@@ -52,7 +53,7 @@ void AnimationEngine::init() {
 // ANIMATION PLAYBACK
 // ============================================================================
 
-void AnimationEngine::play(AnimState state, bool priority) {
+void AnimationEngine::play(AnimState state, bool priority, bool forceLoop) {
     // Check if already playing this animation
     if (_currentState == state && _playing && !priority) {
         return;
@@ -76,9 +77,11 @@ void AnimationEngine::play(AnimState state, bool priority) {
     _lastFrameTime = millis();
     _playing = true;
     _paused = false;
+    _forceLoop = forceLoop;  // ⭐ NEW: Store forced loop state
     
-    Serial.printf("[ANIM] Playing: %s (%d frames @ %d FPS)\n", 
-                  anim->name, anim->frameCount, anim->fps);
+    Serial.printf("[ANIM] Playing: %s (%d frames @ %d FPS)%s\n", 
+                  anim->name, anim->frameCount, anim->fps,
+                  forceLoop ? " [FORCED LOOP]" : "");
 }
 
 void AnimationEngine::stop() {
@@ -136,19 +139,31 @@ void AnimationEngine::advanceFrame() {
     
     // Check if animation complete
     if (_currentFrame >= _currentAnimation->frameCount) {
-        if (_currentAnimation->loop) {
+        Serial.printf("[ANIM] End of frames. Loop:%d ForceLoop:%d\n", 
+                      _currentAnimation->loop, _forceLoop);
+        
+        if (_currentAnimation->loop || _forceLoop) {
             // Loop back to start
             _currentFrame = 0;
+            Serial.println("[ANIM] Looping to frame 0");
         } else {
             // Animation finished
-            _currentFrame = _currentAnimation->frameCount - 1;  // Hold last frame
+            _currentFrame = _currentAnimation->frameCount - 1;
+            Serial.println("[ANIM] Animation complete");
             onAnimationComplete();
         }
     }
 }
 
+
 void AnimationEngine::onAnimationComplete() {
     Serial.printf("[ANIM] Animation complete: %s\n", _currentAnimation->name);
+    
+    // Check if forced to loop
+    if (_forceLoop) {
+        _currentFrame = 0;  // Restart from beginning
+        return;
+    }
     
     if (_autoReturnToIdle && _currentState != AnimState::IDLE) {
         // Return to idle after non-looping animation
@@ -197,4 +212,19 @@ void AnimationEngine::setGlobalFPS(uint8_t fps) {
 
 void AnimationEngine::setAutoReturnToIdle(bool enabled) {
     _autoReturnToIdle = enabled;
+}
+
+void AnimationEngine::pauseOnFrame(uint8_t frameIndex) {
+    if (_currentAnimation != nullptr && frameIndex < _currentAnimation->frameCount) {
+        _currentFrame = frameIndex;
+        _paused = true;
+    }
+}
+
+void AnimationEngine::stopForcedLoop() {
+    if (_forceLoop) {
+        Serial.println("[ANIM] Stopping forced loop");
+        _forceLoop = false;
+        // Animation will finish current cycle and stop
+    }
 }
