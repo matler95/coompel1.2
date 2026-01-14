@@ -6,7 +6,10 @@
       "Bash(platformio run:*)",
       "Bash(python -c \"import os; os.system\\(''pio run''\\)\")",
       "Bash(where:*)",
-      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev\")"
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev\")",
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 30\")",
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 40\")",
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 20\")"
     ]
   }
 }

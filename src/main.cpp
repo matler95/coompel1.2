@@ -15,6 +15,7 @@
 #include "SensorHub.h"
 #include "WiFiManager.h"
 #include "WeatherService.h"
+#include "WeatherIcons.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -37,13 +38,17 @@ enum class AppMode {
     MENU,
     SENSORS,
     WIFI_SETUP,    // Show captive portal connection info
-    WIFI_INFO      // Show connection status details
+    WIFI_INFO,     // Show connection status details
+    WEATHER_VIEW,  // Show weather forecast
+    WEATHER_ABOUT  // Show weather data attribution
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
 // Encoder edit mode: when true, rotating adjusts the current VALUE/TOGGLE item;
 // when false, rotating moves selection up/down.
 bool encoderEditMode = false;
+// Weather view page: 0 = overview, 1-4 = individual day details
+uint8_t weatherViewPage = 0;
 
 // ============================================================================
 // TIMING FOR NATURAL BEHAVIORS
@@ -114,6 +119,7 @@ MenuItem weatherTestForecastItem("Test Forecast");
 MenuItem weatherEnableItem("Enable Weather");
 MenuItem weatherViewItem("View Forecast");
 MenuItem weatherPrivacyItem("Privacy Info");
+MenuItem weatherAboutItem("About");
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -134,6 +140,8 @@ void updateMenuMode();
 void updateSensorsMode();
 void updateWiFiSetupMode();
 void updateWiFiInfoMode();
+void updateWeatherViewMode();
+void updateWeatherAboutMode();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
@@ -265,8 +273,14 @@ void loop() {
         case AppMode::WIFI_INFO:
             updateWiFiInfoMode();
             break;
+        case AppMode::WEATHER_VIEW:
+            updateWeatherViewMode();
+            break;
+        case AppMode::WEATHER_ABOUT:
+            updateWeatherAboutMode();
+            break;
     }
-    
+
     delay(10);
 }
 
@@ -379,12 +393,14 @@ void setupMenu() {
     weatherEnableItem.setType(MenuItemType::ACTION);
     weatherViewItem.setType(MenuItemType::ACTION);
     weatherPrivacyItem.setType(MenuItemType::ACTION);
+    weatherAboutItem.setType(MenuItemType::ACTION);
 
     weatherMenu.addChild(&weatherTestGeoItem);
     weatherMenu.addChild(&weatherTestForecastItem);
     weatherMenu.addChild(&weatherEnableItem);
     weatherMenu.addChild(&weatherViewItem);
     weatherMenu.addChild(&weatherPrivacyItem);
+    weatherMenu.addChild(&weatherAboutItem);
 
     // Assign menu item IDs for fast lookup
     mainMenu.setID(MenuItemID::MAIN_MENU);
@@ -418,6 +434,7 @@ void setupMenu() {
     weatherEnableItem.setID(MenuItemID::WEATHER_ENABLE);
     weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
     weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
+    weatherAboutItem.setID(MenuItemID::WEATHER_ABOUT);
 
     menuSystem.init(&mainMenu);
     menuSystem.setStateCallback(onMenuStateChange);
@@ -732,6 +749,17 @@ void onMenuStateChange(MenuItem* item) {
             testWeatherForecast();
             break;
 
+        case MenuItemID::WEATHER_VIEW:
+            weatherViewPage = 0;  // Start at overview
+            currentMode = AppMode::WEATHER_VIEW;
+            Serial.println("[NAV] Entered weather view");
+            break;
+
+        case MenuItemID::WEATHER_ABOUT:
+            currentMode = AppMode::WEATHER_ABOUT;
+            Serial.println("[NAV] Entered weather about");
+            break;
+
         default:
             break;
     }
@@ -780,6 +808,26 @@ void updateMenuMode() {
 // ============================================================================
 
 void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
+    // Handle weather view navigation
+    if (currentMode == AppMode::WEATHER_VIEW) {
+        if (event == EncoderEvent::ROTATED_CW || event == EncoderEvent::ROTATED_CCW) {
+            const WeatherForecast& forecast = weatherService.getForecast();
+            uint8_t maxPage = forecast.valid ? forecast.dayCount : 0;
+
+            if (event == EncoderEvent::ROTATED_CW) {
+                weatherViewPage++;
+                if (weatherViewPage > maxPage) weatherViewPage = 0;
+            } else {
+                if (weatherViewPage == 0) {
+                    weatherViewPage = maxPage;
+                } else {
+                    weatherViewPage--;
+                }
+            }
+        }
+        return;
+    }
+
     if (currentMode != AppMode::MENU) {
         return;
     }
@@ -1024,6 +1072,141 @@ void updateWiFiInfoMode() {
         // No credentials at all
         display.drawText("Not configured", 0, 16, 1);
     }
+
+    display.update();
+}
+
+// ============================================================================
+// WEATHER VIEW MODE
+// ============================================================================
+
+void updateWeatherViewMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 100) return;
+    lastUpdate = millis();
+
+    display.clear();
+
+    if (!weatherService.hasValidData()) {
+        display.showTextCentered("Weather", 0, 1);
+        display.drawText("No data", 0, 20, 1);
+        display.drawText("available", 0, 32, 1);
+
+        if (wifi.isConnected()) {
+            display.drawText("Fetching...", 0, 48, 1);
+        } else {
+            display.drawText("No WiFi", 0, 48, 1);
+        }
+
+        display.update();
+        return;
+    }
+
+    const WeatherForecast& forecast = weatherService.getForecast();
+    const GeoLocation& location = weatherService.getLocation();
+
+    if (weatherViewPage == 0) {
+        // Overview page: show all 4 days in compact format
+        // Header: City name
+        display.drawText(location.city, 0, 0, 1);
+
+        // Show 4 days in compact format
+        // Each row: icon (8px) + date (5 chars) + temp range
+        for (int i = 0; i < forecast.dayCount && i < 4; i++) {
+            int y = 14 + (i * 12);
+
+            // Draw weather icon (8x8)
+            const uint8_t* icon = getWeatherIcon(forecast.days[i].symbolCode);
+            display.drawBitmap(icon, 0, y, 8, 8, 1);
+
+            // Date: show day of month only (chars 8-9 from YYYY-MM-DD)
+            char dayNum[4];
+            strncpy(dayNum, &forecast.days[i].date[8], 2);
+            dayNum[2] = '\0';
+            display.drawText(dayNum, 12, y, 1);
+
+            // Temperature range
+            char tempStr[16];
+            snprintf(tempStr, sizeof(tempStr), "%.0f/%.0f",
+                    forecast.days[i].tempMin, forecast.days[i].tempMax);
+            display.drawText(tempStr, 30, y, 1);
+
+            // Humidity
+            char humStr[8];
+            snprintf(humStr, sizeof(humStr), "%.0f%%", forecast.days[i].humidity);
+            display.drawText(humStr, 80, y, 1);
+        }
+
+        // Footer: scroll hint
+        display.drawText("Rotate: details", 0, 56, 1);
+
+    } else {
+        // Detail page for single day (1-4)
+        uint8_t dayIdx = weatherViewPage - 1;
+        if (dayIdx >= forecast.dayCount) {
+            weatherViewPage = 0;
+            return;
+        }
+
+        const DailyForecast& day = forecast.days[dayIdx];
+
+        // Header: Full date
+        display.drawText(day.date, 0, 0, 1);
+
+        // Large weather icon (centered, 8x8 but we can draw it larger conceptually)
+        const uint8_t* icon = getWeatherIcon(day.symbolCode);
+        display.drawBitmap(icon, 60, 0, 8, 8, 1);
+
+        // Temperature
+        char tempLine[32];
+        snprintf(tempLine, sizeof(tempLine), "Temp: %.1f - %.1f C",
+                day.tempMin, day.tempMax);
+        display.drawText(tempLine, 0, 16, 1);
+
+        // Humidity
+        char humLine[20];
+        snprintf(humLine, sizeof(humLine), "Humidity: %.0f%%", day.humidity);
+        display.drawText(humLine, 0, 28, 1);
+
+        // Weather condition
+        display.drawText("Cond:", 0, 40, 1);
+        // Truncate symbol code if too long
+        char symbolShort[16];
+        strncpy(symbolShort, day.symbolCode, 15);
+        symbolShort[15] = '\0';
+        display.drawText(symbolShort, 36, 40, 1);
+
+        // Footer: navigation hint
+        char navHint[24];
+        snprintf(navHint, sizeof(navHint), "Day %d/%d  Rotate:nav",
+                dayIdx + 1, forecast.dayCount);
+        display.drawText(navHint, 0, 56, 1);
+    }
+
+    display.update();
+}
+
+// ============================================================================
+// WEATHER ABOUT MODE - Attribution screen
+// ============================================================================
+
+void updateWeatherAboutMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 500) return;
+    lastUpdate = millis();
+
+    display.clear();
+
+    // Title
+    display.showTextCentered("Weather Data", 0, 1);
+
+    // Attribution text
+    display.drawText("Provided by", 0, 16, 1);
+    display.drawText("MET Norway", 0, 28, 1);
+    display.drawText("yr.no", 0, 40, 1);
+
+    // Footer hint
+    display.drawText("[Hold to exit]", 0, 56, 1);
 
     display.update();
 }
