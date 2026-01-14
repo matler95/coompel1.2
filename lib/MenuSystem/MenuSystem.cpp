@@ -96,10 +96,10 @@ void MenuSystem::navigate(MenuNav direction) {
             break;
     }
     
-    // Trigger state callback
-    if (_stateCallback != nullptr) {
-        _stateCallback(getCurrentItem());
-    }
+    // // Trigger state callback
+    // if (_stateCallback != nullptr) {
+    //     _stateCallback(getCurrentItem());
+    // }
 }
 
 void MenuSystem::enterSubmenu() {
@@ -135,14 +135,19 @@ void MenuSystem::exitSubmenu() {
 void MenuSystem::executeCurrentItem() {
     MenuItem* selected = getCurrentItem();
     if (selected == nullptr || !selected->isEnabled()) return;
-    
+
     if (selected->hasChildren()) {
-        // Navigate into submenu
+        // Navigate into submenu ONLY
         enterSubmenu();
     } else {
         // Execute action
         selected->execute();
         Serial.printf("[MENU] Executed: %s\n", selected->getText());
+
+        //  CALLBACK ONLY FOR ACTIONS
+        if (_stateCallback != nullptr) {
+            _stateCallback(selected);
+        }
     }
 }
 

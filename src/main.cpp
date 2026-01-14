@@ -13,6 +13,7 @@
 #include "MenuSystem.h"
 #include "AnimationEngine.h"
 #include "SensorHub.h"
+#include "WiFiManager.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -24,6 +25,7 @@ TouchSensor touch(TOUCH_SENSOR_PIN);
 MenuSystem menuSystem(&display);
 AnimationEngine animator(&display);
 SensorHub sensors;
+WiFiManager wifi;
 
 // ============================================================================
 // APPLICATION STATE
@@ -32,6 +34,8 @@ enum class AppMode {
     ANIMATIONS,
     MENU,
     SENSORS,
+    WIFI_SETUP,    // Show captive portal connection info
+    WIFI_INFO      // Show connection status details
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
@@ -95,6 +99,12 @@ MenuItem dizzyAnimItem("Dizzy");
 MenuItem tempHumidItem("Temp/Humidity");
 MenuItem soundLevelItem("Sound Level");
 
+// WiFi menu items
+MenuItem wifiMenu("WiFi");
+MenuItem wifiConfigureItem("Configure");
+MenuItem wifiStatusItem("Status");
+MenuItem wifiForgetItem("Forget Network");
+
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
@@ -112,10 +122,14 @@ void scheduleNextWinkCheck();
 void updateAnimationsMode();
 void updateMenuMode();
 void updateSensorsMode();
+void updateWiFiSetupMode();
+void updateWiFiInfoMode();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
 void applyBrightnessFromSettings();
+void onWiFiEvent(WiFiEvent event);
+void drawWiFiStatusIcon();
 
 // ============================================================================
 // SETUP
@@ -175,7 +189,11 @@ void setup() {
     // Setup menu
     setupMenu();
     applyBrightnessFromSettings();
-    
+
+    // Initialize WiFi
+    wifi.init();
+    wifi.setEventCallback(onWiFiEvent);
+
     // Schedule first behaviors
     scheduleNextBlink();
     scheduleNextWinkCheck();
@@ -200,11 +218,12 @@ void loop() {
     input.update();
     motion.update();
     sensors.update();
-    
+    wifi.update();  // Handle WiFi state machine
+
     #if TOUCH_ENABLED
     touch.update();
     #endif
-    
+
     animator.update();
 
     // Check if shaking stopped
@@ -225,6 +244,12 @@ void loop() {
             break;
         case AppMode::SENSORS:
             updateSensorsMode();
+            break;
+        case AppMode::WIFI_SETUP:
+            updateWiFiSetupMode();
+            break;
+        case AppMode::WIFI_INFO:
+            updateWiFiInfoMode();
             break;
     }
     
@@ -250,7 +275,7 @@ void checkRandomAnimations() {
 
     // Check for scheduled blink
     if (currentTime - lastBlinkTime >= nextBlinkDelay) {
-        Serial.println("[ANIM] Natural blink");
+        // Serial.println("[ANIM] Natural blink");
         animator.play(AnimState::IDLE, true);  // Priority play
         lastBlinkTime = currentTime;
         scheduleNextBlink();
@@ -260,7 +285,7 @@ void checkRandomAnimations() {
     // Check for wink (easter egg)
     if (currentTime - lastWinkCheck >= nextWinkDelay) {
         if (random(100) < 30) {  // 30% chance
-            Serial.println("[ANIM] Easter egg wink!");
+            // Serial.println("[ANIM] Easter egg wink!");
             animator.play(AnimState::WINK, true);
         }
         lastWinkCheck = currentTime;
@@ -270,12 +295,12 @@ void checkRandomAnimations() {
 
 void scheduleNextBlink() {
     nextBlinkDelay = random(3000, 8000);  // 3-8 seconds
-    Serial.printf("[ANIM] Next blink in %lu ms\n", nextBlinkDelay);
+    // Serial.printf("[ANIM] Next blink in %lu ms\n", nextBlinkDelay);
 }
 
 void scheduleNextWinkCheck() {
     nextWinkDelay = random(15000, 45000);  // 15-45 seconds
-    Serial.printf("[ANIM] Next wink check in %lu ms\n", nextWinkDelay);
+    // Serial.printf("[ANIM] Next wink check in %lu ms\n", nextWinkDelay);
 }
 
 // ============================================================================
@@ -319,6 +344,18 @@ void setupMenu() {
     settingsMenu.addChild(&brightnessItem);
     settingsMenu.addChild(&soundItem);
     settingsMenu.addChild(&sensitivityItem);
+    settingsMenu.addChild(&wifiMenu);
+
+    // WiFi submenu
+    wifiMenu.setType(MenuItemType::SUBMENU);
+    wifiConfigureItem.setType(MenuItemType::ACTION);
+    wifiStatusItem.setType(MenuItemType::INFO);
+    wifiForgetItem.setType(MenuItemType::ACTION);
+    
+
+    wifiMenu.addChild(&wifiConfigureItem);
+    wifiMenu.addChild(&wifiStatusItem);
+    wifiMenu.addChild(&wifiForgetItem);
 
     // Assign menu item IDs for fast lookup
     mainMenu.setID(MenuItemID::MAIN_MENU);
@@ -340,6 +377,11 @@ void setupMenu() {
     brightnessItem.setID(MenuItemID::SETTING_BRIGHTNESS);
     soundItem.setID(MenuItemID::SETTING_SOUND);
     sensitivityItem.setID(MenuItemID::SETTING_SENSITIVITY);
+
+    wifiMenu.setID(MenuItemID::SETTING_WIFI);
+    wifiConfigureItem.setID(MenuItemID::WIFI_CONFIGURE);
+    wifiStatusItem.setID(MenuItemID::WIFI_STATUS);
+    wifiForgetItem.setID(MenuItemID::WIFI_FORGET);
 
     menuSystem.init(&mainMenu);
     menuSystem.setStateCallback(onMenuStateChange);
@@ -550,6 +592,21 @@ void onMenuStateChange(MenuItem* item) {
             currentMode = AppMode::SENSORS;
             break;
 
+        case MenuItemID::WIFI_CONFIGURE:
+            wifi.startCaptivePortal();
+            currentMode = AppMode::WIFI_SETUP;
+            break;
+
+        case MenuItemID::WIFI_STATUS:
+            currentMode = AppMode::WIFI_INFO;
+            break;
+
+        case MenuItemID::WIFI_FORGET:
+            wifi.clearCredentials();
+            wifi.disconnect();
+            menuSystem.draw();  // Refresh display
+            break;
+
         default:
             break;
     }
@@ -660,7 +717,7 @@ void updateAnimationsMode() {
     if (wasPlaying && !isPlaying && !isShaking) {
         animator.showStaticFrame(AnimState::IDLE, 0);
         needsRedraw = true;
-        Serial.println("[ANIM] Transition to base frame");
+        // Serial.println("[ANIM] Transition to base frame");
     }
 
     // Check if frame changed
@@ -685,7 +742,10 @@ void updateAnimationsMode() {
     if (needsRedraw || display.isDirty()) {
         display.clear();
         animator.draw();
-        display.drawText("Hold=Menu", 64, 56, 1, TextAlign::CENTER);
+
+        // Draw WiFi status icon in top-right corner
+        drawWiFiStatusIcon();
+
         display.update();
     }
 }
@@ -718,6 +778,126 @@ void updateSensorsMode() {
         snprintf(buffer, sizeof(buffer), "Sound: %d%%", soundPercent);
         display.drawText(buffer, 0, 32, 1);
         display.drawProgressBar(0, 40, 127, 6, soundPercent / 100.0f);
+    }
+
+    display.update();
+}
+
+// ============================================================================
+// WIFI FUNCTIONS
+// ============================================================================
+
+void onWiFiEvent(WiFiEvent event) {
+    switch (event) {
+        case WiFiEvent::AP_STARTED:
+            Serial.println("[WiFi] Captive portal started");
+            if (currentMode != AppMode::WIFI_SETUP) {
+                currentMode = AppMode::WIFI_SETUP;
+            }
+            break;
+
+        case WiFiEvent::CONNECTED:
+            Serial.printf("[WiFi] Connected to %s\n", wifi.getSSID());
+            Serial.printf("[WiFi] IP: %s\n", wifi.getIPAddress().c_str());
+            if (currentMode == AppMode::WIFI_SETUP) {
+                currentMode = AppMode::ANIMATIONS;
+            }
+            break;
+
+        case WiFiEvent::DISCONNECTED:
+            Serial.println("[WiFi] Disconnected");
+            break;
+
+        case WiFiEvent::FAILED:
+            Serial.println("[WiFi] Connection failed");
+            break;
+
+        default:
+            break;
+    }
+}
+
+void drawWiFiStatusIcon() {
+    #include "WiFiIcons.h"
+
+    const uint8_t* icon = nullptr;
+
+    if (wifi.isConnected()) {
+        icon = wifi_connected;
+    } else if (wifi.isAPActive()) {
+        icon = wifi_ap;
+    } else {
+        WiFiState state = wifi.getState();
+        switch (state) {
+            case WiFiState::CONNECTING: icon = wifi_connecting; break;
+            case WiFiState::DISCONNECTED:
+            case WiFiState::FAILED:
+            default: icon = wifi_disconnected; break;
+        }
+    }
+
+    if (icon != nullptr) {
+        display.drawBitmap(icon, 120, 0, 8, 8); // Top-right corner
+    }
+}
+
+void updateWiFiSetupMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 500) return;
+    lastUpdate = millis();
+
+    display.clear();
+    display.showTextCentered("WiFi Setup", 0, 1);
+
+    display.drawText("Connect to:", 0, 16, 1);
+    display.drawText(wifi.getAPName().c_str(), 0, 28, 1);
+    display.drawText("Open browser:", 0, 40, 1);
+    display.drawText("192.168.4.1", 0, 52, 1);
+
+    display.update();
+}
+
+void updateWiFiInfoMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 1000) return;
+    lastUpdate = millis();
+
+    display.clear();
+    display.showTextCentered("WiFi Status", 0, 1);
+
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    WiFiState state = wifi.getState();
+
+    if (connected) {
+        // WiFi is really connected
+        display.drawText("Connected", 0, 16, 1);
+        display.drawText(wifi.getSSID(), 0, 28, 1);
+        display.drawText(wifi.getIPAddress().c_str(), 0, 40, 1);
+
+        char rssi[16];
+        snprintf(rssi, sizeof(rssi), "RSSI: %d dBm", wifi.getSignalStrength());
+        display.drawText(rssi, 0, 52, 1);
+
+    } else if (wifi.hasCredentials()) {
+        // WiFi credentials stored but not connected
+        display.drawText("Configured only", 0, 16, 1);
+        display.drawText(wifi.getConfiguredSSID(), 0, 28, 1);
+
+        const char* stateStr = "Unknown";
+        switch (state) {
+            case WiFiState::IDLE: stateStr = "Idle"; break;
+            case WiFiState::AP_MODE: stateStr = "AP Mode"; break;
+            case WiFiState::CONNECTING: stateStr = "Connecting..."; break;
+            case WiFiState::DISCONNECTED: stateStr = "Disconnected"; break;
+            case WiFiState::FAILED: stateStr = "Failed"; break;
+            default: break;
+        }
+        display.drawText("Status:", 0, 40, 1);
+        display.drawText(stateStr, 0, 52, 1);
+
+    } else {
+        // No credentials at all
+        display.drawText("Not configured", 0, 16, 1);
     }
 
     display.update();

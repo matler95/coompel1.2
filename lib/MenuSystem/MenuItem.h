@@ -63,7 +63,13 @@ enum class MenuItemID : uint16_t {
     // Settings items
     SETTING_BRIGHTNESS = 41,
     SETTING_SOUND = 42,
-    SETTING_SENSITIVITY = 43
+    SETTING_SENSITIVITY = 43,
+
+    // WiFi items
+    SETTING_WIFI = 44,
+    WIFI_CONFIGURE = 441,
+    WIFI_STATUS = 442,
+    WIFI_FORGET = 443
 };
 
 // ============================================================================

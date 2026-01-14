@@ -36,7 +36,7 @@ AnimationEngine::AnimationEngine(DisplayManager* display)
 }
 
 void AnimationEngine::init() {
-    Serial.println("[ANIM] Initializing animation engine...");
+    // Serial.println("[ANIM] Initializing animation engine...");
     
     // Register built-in animations
     registerAnimation(AnimState::IDLE, &anim_idle);
@@ -47,7 +47,7 @@ void AnimationEngine::init() {
     // Start with idle animation
     play(AnimState::IDLE);
     
-    Serial.println("[ANIM] Animation engine ready");
+    // Serial.println("[ANIM] Animation engine ready");
 }
 
 // ============================================================================
@@ -67,7 +67,7 @@ void AnimationEngine::play(AnimState state, bool priority, bool forceLoop) {
     
     const Animation* anim = getAnimation(state);
     if (anim == nullptr) {
-        Serial.printf("[ANIM] ERROR: Animation %d not found\n", (int)state);
+        // Serial.printf("[ANIM] ERROR: Animation %d not found\n", (int)state);
         return;
     }
     
@@ -81,9 +81,9 @@ void AnimationEngine::play(AnimState state, bool priority, bool forceLoop) {
     _forceLoop = forceLoop;
     _continuousLoop = forceLoop;  // Track if we should keep looping
 
-    Serial.printf("[ANIM] Playing: %s (%d frames)%s\n",
-                  anim->name, anim->frameCount,
-                  forceLoop ? " [CONTINUOUS LOOP]" : "");
+    // Serial.printf("[ANIM] Playing: %s (%d frames)%s\n",
+                //   anim->name, anim->frameCount,
+                //   forceLoop ? " [CONTINUOUS LOOP]" : "");
 }
 
 void AnimationEngine::stop() {
@@ -141,18 +141,18 @@ void AnimationEngine::advanceFrame() {
 
     // Check if animation complete
     if (_currentFrame >= _currentAnimation->frameCount) {
-        Serial.printf("[ANIM] End of frames. Loop:%d ContinuousLoop:%d\n",
-                      _currentAnimation->loop, _continuousLoop);
+        // Serial.printf("[ANIM] End of frames. Loop:%d ContinuousLoop:%d\n",
+                    //   _currentAnimation->loop, _continuousLoop);
 
         // Check if should loop
         if (_currentAnimation->loop || _continuousLoop) {
             // Loop back to start
             _currentFrame = 0;
-            Serial.println("[ANIM] Looping to frame 0");
+            // Serial.println("[ANIM] Looping to frame 0");
         } else {
             // Animation finished
             _currentFrame = _currentAnimation->frameCount - 1;
-            Serial.println("[ANIM] Animation complete");
+            // Serial.println("[ANIM] Animation complete");
             onAnimationComplete();
         }
     }
@@ -160,7 +160,7 @@ void AnimationEngine::advanceFrame() {
 
 
 void AnimationEngine::onAnimationComplete() {
-    Serial.printf("[ANIM] Animation complete: %s\n", _currentAnimation->name);
+    // Serial.printf("[ANIM] Animation complete: %s\n", _currentAnimation->name);
 
     // Stop playing - animation is done
     _playing = false;
@@ -200,7 +200,7 @@ void AnimationEngine::registerAnimation(AnimState state, const Animation* animat
     uint8_t index = (uint8_t)state;
     if (index < 8) {
         _animations[index] = animation;
-        Serial.printf("[ANIM] Registered: %s\n", animation->name);
+        // Serial.printf("[ANIM] Registered: %s\n", animation->name);
     }
 }
 
@@ -221,7 +221,7 @@ void AnimationEngine::pauseOnFrame(uint8_t frameIndex) {
 
 void AnimationEngine::stopForcedLoop() {
     if (_forceLoop) {
-        Serial.println("[ANIM] Stopping forced loop");
+        // Serial.println("[ANIM] Stopping forced loop");
         _forceLoop = false;
         // Animation will finish current cycle and stop
     }
@@ -241,12 +241,12 @@ void AnimationEngine::showStaticFrame(AnimState state, uint8_t frameIndex) {
     _continuousLoop = false;
     _forceLoop = false;
 
-    Serial.printf("[ANIM] Static frame: %s[%d]\n", anim->name, frameIndex);
+    // Serial.printf("[ANIM] Static frame: %s[%d]\n", anim->name, frameIndex);
 }
 
 void AnimationEngine::stopLoopingGracefully() {
     if (_continuousLoop) {
-        Serial.println("[ANIM] Will stop looping after current cycle");
+        // Serial.println("[ANIM] Will stop looping after current cycle");
         _continuousLoop = false;
         // Animation will finish current cycle and stop naturally
     }

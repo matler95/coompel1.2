@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(dir \"c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2\\\\lib\" /b)",
-      "Bash(pio run:*)"
+      "Bash(pio run:*)",
+      "Bash(platformio run:*)",
+      "Bash(python -c \"import os; os.system\\(''pio run''\\)\")"
     ]
   }
 }

@@ -30,34 +30,34 @@ MotionSensor::MotionSensor(uint8_t i2c_address)
 }
 
 bool MotionSensor::init(TwoWire* wire) {
-    Serial.println("[MOTION] Initializing MPU6050...");
+    // Serial.println("[MOTION] Initializing MPU6050...");
     
     // Try to initialize MPU6050
     if (!_mpu.begin(_i2c_address, wire)) {
-        Serial.println("[MOTION] ERROR: Failed to find MPU6050!");
+        // Serial.println("[MOTION] ERROR: Failed to find MPU6050!");
         Serial.printf("[MOTION] Check I2C address 0x%02X and wiring\n", _i2c_address);
         return false;
     }
     
-    Serial.println("[MOTION] MPU6050 found!");
+    // Serial.println("[MOTION] MPU6050 found!");
     
     // Configure sensor ranges
     _mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-    Serial.println("[MOTION] Accelerometer range: ±8G");
+    // Serial.println("[MOTION] Accelerometer range: ±8G");
     
     _mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-    Serial.println("[MOTION] Gyro range: ±500°/s");
+    // Serial.println("[MOTION] Gyro range: ±500°/s");
     
     _mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-    Serial.println("[MOTION] Filter bandwidth: 21 Hz");
+    // Serial.println("[MOTION] Filter bandwidth: 21 Hz");
     
     _initialized = true;
     
     // Auto-calibrate
-    Serial.println("[MOTION] Calibrating... keep device still");
+    // Serial.println("[MOTION] Calibrating... keep device still");
     calibrate(100);
     
-    Serial.println("[MOTION] Initialization complete");
+    // Serial.println("[MOTION] Initialization complete");
     return true;
 }
 
@@ -111,7 +111,7 @@ void MotionSensor::detectShake() {
             _lastShakeTime = currentTime;
             _lastEvent = MotionEvent::SHAKE;
             triggerCallback(MotionEvent::SHAKE);
-            Serial.println("[MOTION] Shake detected!");
+            // Serial.println("[MOTION] Shake detected!");
         }
     } else {
         _isShaking = false;

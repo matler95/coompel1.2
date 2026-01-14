@@ -47,8 +47,9 @@ bool DisplayManager::init(uint8_t sda_pin, uint8_t scl_pin, uint32_t frequency) 
     _display->clearDisplay();
     _display->setTextColor(SH110X_WHITE);
     _display->setTextWrap(false);
-    _display->cp437(true);  // Code page 437 font
-    
+    // _display->cp437(true);  // Code page 437 font
+    // _display->setFont(&Font5x7FixedMono);  // <-- sets global font
+
     _initialized = true;
     
     // Show startup splash
