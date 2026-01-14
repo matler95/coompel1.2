@@ -5,7 +5,8 @@
       "Bash(pio run:*)",
       "Bash(platformio run:*)",
       "Bash(python -c \"import os; os.system\\(''pio run''\\)\")",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev\")"
     ]
   }
 }

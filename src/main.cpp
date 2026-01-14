@@ -14,8 +14,7 @@
 #include "AnimationEngine.h"
 #include "SensorHub.h"
 #include "WiFiManager.h"
-#include "GeoLocationClient.h"
-#include "WeatherClient.h"
+#include "WeatherService.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -28,6 +27,7 @@ MenuSystem menuSystem(&display);
 AnimationEngine animator(&display);
 SensorHub sensors;
 WiFiManager wifi;
+WeatherService weatherService;
 
 // ============================================================================
 // APPLICATION STATE
@@ -204,6 +204,9 @@ void setup() {
     wifi.init();
     wifi.setEventCallback(onWiFiEvent);
 
+    // Initialize weather service
+    weatherService.init();
+
     // Schedule first behaviors
     scheduleNextBlink();
     scheduleNextWinkCheck();
@@ -229,6 +232,7 @@ void loop() {
     motion.update();
     sensors.update();
     wifi.update();  // Handle WiFi state machine
+    weatherService.update();  // Non-blocking weather updates
 
     #if TOUCH_ENABLED
     touch.update();
@@ -606,67 +610,70 @@ void testGeolocation() {
         return;
     }
 
-    Serial.println("[Weather] Testing geolocation...");
-    size_t heapBefore = ESP.getFreeHeap();
+    Serial.println("[Weather] Force updating weather service...");
 
-    GeoLocationClient geoClient;
-    GeoLocation location;
+    // Force update to get fresh data
+    if (weatherService.forceUpdate()) {
+        const GeoLocation& location = weatherService.getLocation();
+        const WeatherForecast& forecast = weatherService.getForecast();
 
-    if (geoClient.fetchLocation(location)) {
-        Serial.printf("[Weather] Success! Location: %.4f, %.4f\n",
-                      location.latitude, location.longitude);
-        Serial.printf("[Weather] City: %s, Country: %s\n",
+        Serial.println("[Weather] Update successful!");
+        Serial.printf("[Weather] Location: %.4f, %.4f (%s, %s)\n",
+                      location.latitude, location.longitude,
                       location.city, location.country);
-    } else {
-        Serial.println("[Weather] Geolocation failed");
-    }
 
-    size_t heapAfter = ESP.getFreeHeap();
-    Serial.printf("[Weather] Heap used: %d bytes\n", heapBefore - heapAfter);
+        if (forecast.valid) {
+            Serial.printf("[Weather] Forecast: %d days\n", forecast.dayCount);
+            for (int i = 0; i < forecast.dayCount; i++) {
+                Serial.printf("[Weather]   %s: %.1f-%.1f°C, %.0f%%, %s\n",
+                              forecast.days[i].date,
+                              forecast.days[i].tempMin,
+                              forecast.days[i].tempMax,
+                              forecast.days[i].humidity,
+                              forecast.days[i].symbolCode);
+            }
+        }
+
+        Serial.printf("[Weather] Data cached, update interval: %lu hours\n",
+                     weatherService.getUpdateInterval() / 3600UL);
+    } else {
+        Serial.println("[Weather] Update failed");
+    }
 }
 
 void testWeatherForecast() {
-    if (!wifi.isConnected()) {
-        Serial.println("[Weather] Not connected to WiFi");
-        return;
-    }
+    Serial.println("[Weather] Checking cached weather data...");
 
-    Serial.println("[Weather] Testing weather forecast...");
-    size_t heapBefore = ESP.getFreeHeap();
+    if (weatherService.hasValidData()) {
+        const GeoLocation& location = weatherService.getLocation();
+        const WeatherForecast& forecast = weatherService.getForecast();
 
-    // First get location
-    GeoLocationClient geoClient;
-    GeoLocation location;
+        Serial.printf("[Weather] Location: %s, %s\n", location.city, location.country);
+        Serial.printf("[Weather] Forecast: %d days\n", forecast.dayCount);
 
-    if (!geoClient.fetchLocation(location)) {
-        Serial.println("[Weather] Failed to get location");
-        return;
-    }
-
-    Serial.printf("[Weather] Location: %.4f, %.4f (%s, %s)\n",
-                  location.latitude, location.longitude,
-                  location.city, location.country);
-
-    // Now get weather forecast
-    WeatherClient weatherClient;
-    WeatherForecast forecast;
-
-    if (weatherClient.fetchForecast(location.latitude, location.longitude, forecast)) {
-        Serial.println("[Weather] Forecast fetched successfully!");
         for (int i = 0; i < forecast.dayCount; i++) {
-            Serial.printf("[Weather] %s: %.1f-%.1f°C, %.0f%% humidity, %s\n",
+            Serial.printf("[Weather]   %s: %.1f-%.1f°C, %.0f%%, %s\n",
                           forecast.days[i].date,
                           forecast.days[i].tempMin,
                           forecast.days[i].tempMax,
                           forecast.days[i].humidity,
                           forecast.days[i].symbolCode);
         }
-    } else {
-        Serial.println("[Weather] Failed to fetch forecast");
-    }
 
-    size_t heapAfter = ESP.getFreeHeap();
-    Serial.printf("[Weather] Total heap used: %d bytes\n", heapBefore - heapAfter);
+        uint32_t lastUpdate = weatherService.getLastUpdateTime();
+        uint32_t now = millis() / 1000;
+        uint32_t timeSince = now - lastUpdate;
+        Serial.printf("[Weather] Last update: %lu seconds ago\n", timeSince);
+
+        WeatherState state = weatherService.getState();
+        Serial.printf("[Weather] State: %s\n",
+                     state == WeatherState::CACHED ? "CACHED" :
+                     state == WeatherState::STALE ? "STALE" :
+                     state == WeatherState::ERROR ? "ERROR" : "OTHER");
+    } else {
+        Serial.println("[Weather] No valid weather data available");
+        Serial.println("[Weather] Use 'Test Geolocation' to fetch data");
+    }
 }
 
 // ============================================================================
