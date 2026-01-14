@@ -80,6 +80,10 @@ MenuItem animationsMenu("Animations");
 MenuItem sensorsMenu("Sensors");
 MenuItem motionTestMenu("Motion Test");
 MenuItem settingsMenu("Settings");
+MenuItem test1Menu("Test 1");
+MenuItem test2Menu("Test 2");
+MenuItem test3Menu("Test 3");
+MenuItem test4Menu("Test 4");
 
 // Brightness as user-facing percent (10-100, in steps of 10)
 MenuItem brightnessItem("Brightness", 100, 10, 100);
@@ -290,6 +294,10 @@ void setupMenu() {
     mainMenu.addChild(&sensorsMenu);
     // mainMenu.addChild(&motionTestMenu);  // Disabled - motion features work fine
     mainMenu.addChild(&settingsMenu);
+    mainMenu.addChild(&test1Menu);
+    mainMenu.addChild(&test2Menu);
+    mainMenu.addChild(&test3Menu);
+    mainMenu.addChild(&test4Menu);
     
     idleAnimItem.setType(MenuItemType::ACTION);
     winkAnimItem.setType(MenuItemType::ACTION);
@@ -327,6 +335,10 @@ void setupMenu() {
     sensorsMenu.setID(MenuItemID::SENSORS_MENU);
     motionTestMenu.setID(MenuItemID::MOTION_TEST_MENU);
     settingsMenu.setID(MenuItemID::SETTINGS_MENU);
+    test1Menu.setID(MenuItemID::TEST1);
+    test2Menu.setID(MenuItemID::TEST2);
+    test3Menu.setID(MenuItemID::TEST3);
+    test4Menu.setID(MenuItemID::TEST4);
 
     idleAnimItem.setID(MenuItemID::ANIM_IDLE);
     winkAnimItem.setID(MenuItemID::ANIM_WINK);
@@ -369,6 +381,7 @@ void onButtonEvent(ButtonEvent event) {
                          currentItem->getType() == MenuItemType::TOGGLE)) {
                         // Toggle edit mode
                         encoderEditMode = !encoderEditMode;
+                        menuSystem.setEditMode(encoderEditMode);
                         menuSystem.draw();
                     } else {
                         menuSystem.navigate(MenuNav::SELECT);
@@ -381,6 +394,7 @@ void onButtonEvent(ButtonEvent event) {
                 if (menuSystem.isAtRoot()) {
                     currentMode = AppMode::ANIMATIONS;
                     encoderEditMode = false;
+                    menuSystem.setEditMode(false);
                     Serial.println("[NAV] Exited menu");
                 } else {
                     menuSystem.navigate(MenuNav::BACK);
@@ -396,6 +410,7 @@ void onButtonEvent(ButtonEvent event) {
             currentMode = AppMode::MENU;
             resetMenuTimeout();
             encoderEditMode = false;
+            menuSystem.setEditMode(false);
             menuSystem.draw();
         }
     }
@@ -638,6 +653,7 @@ void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
             }
             // Leaving the current item cancels edit mode
             encoderEditMode = false;
+            menuSystem.setEditMode(false);
             menuSystem.draw();
         }
 
@@ -718,8 +734,6 @@ void updateSensorsMode() {
         display.drawProgressBar(0, 40, 127, 6, soundPercent / 100.0f);
     }
 
-
-    display.drawText("Hold=Menu", 64, 58, 1, TextAlign::CENTER);
     display.update();
 }
 

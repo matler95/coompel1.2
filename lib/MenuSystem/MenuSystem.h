@@ -96,6 +96,12 @@ public:
      */
     void returnToRoot();
 
+    /**
+     * @brief Set whether the current selection is in edit mode
+     * (used to adjust visual styling for VALUE/TOGGLE items)
+     */
+    void setEditMode(bool edit) { _editMode = edit; }
+
 
 private:
     DisplayManager* _display;
@@ -113,6 +119,9 @@ private:
     
     // Callback
     MenuStateCallback _stateCallback;
+
+    // Visual edit state for current selection
+    bool _editMode = false;
     
     // Private methods
     void enterSubmenu();

@@ -47,6 +47,10 @@ enum class MenuItemID : uint16_t {
     SENSORS_MENU = 20,
     MOTION_TEST_MENU = 30,
     SETTINGS_MENU = 40,
+    TEST1 = 50,
+    TEST2 = 60,
+    TEST3 = 70,
+    TEST4 = 80,
 
     // Animation items
     ANIM_IDLE = 11,

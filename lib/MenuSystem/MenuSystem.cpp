@@ -5,8 +5,34 @@
 
 #include "MenuSystem.h"
 
-#define ITEM_HEIGHT 12
-#define ITEM_PADDING 2
+// ============================================================================
+// LAYOUT CONSTANTS
+// ============================================================================
+#define TITLE_HEIGHT          10      // Reserved space for title bar
+#define TITLE_Y               0       // Title Y position
+#define TITLE_UNDERLINE_Y     7       // Underline Y position
+#define ITEM_HEIGHT           12      // Height of each menu item row
+#define ITEM_START_Y          16      // Y position where menu items start
+#define ITEM_TEXT_OFFSET_Y    2       // Vertical offset for text within item row
+#define ITEM_TEXT_X           4       // X position for unselected item text
+#define ITEM_TEXT_X_SELECTED  10      // X position for selected item text (with arrow)
+#define ITEM_ARROW_X          2       // X position for selection arrow
+#define ITEM_RIGHT_INDICATOR_X 120    // X position for right-side indicators (> or E)
+#define ITEM_VALUE_X          110     // X position for value/toggle display
+#define ITEM_BOX_WIDTH        127     // Width of selection box (display width - 1)
+#define ITEM_BOX_Y_OFFSET     -1      // Y offset for selection box
+
+// Scrollbar constants
+#define SCROLLBAR_X           124     // X position of scrollbar
+#define SCROLLBAR_WIDTH       3       // Width of scrollbar track/thumb
+#define SCROLLBAR_MIN_THUMB   4       // Minimum thumb height in pixels
+
+// Empty menu message
+#define EMPTY_MSG_X           64      // Center X (display width / 2)
+#define EMPTY_MSG_Y           30      // Center Y
+
+// Menu stack
+#define MAX_MENU_DEPTH         10      // Maximum menu nesting depth
 
 // ============================================================================
 // CONSTRUCTOR & INITIALIZATION
@@ -33,7 +59,7 @@ void MenuSystem::init(MenuItem* rootItem) {
     
     // Calculate max visible items from display height
     uint8_t displayHeight = _display->getHeight();
-    _maxVisibleItems = (displayHeight - 10) / ITEM_HEIGHT;  // Leave space for title
+    _maxVisibleItems = (displayHeight - TITLE_HEIGHT) / ITEM_HEIGHT;
     
     Serial.printf("[MENU] Initialized. Max visible: %d items\n", _maxVisibleItems);
 }
@@ -81,7 +107,7 @@ void MenuSystem::enterSubmenu() {
     
     if (selected != nullptr && selected->hasChildren()) {
         // Save current menu to stack
-        if (_depth < 10) {
+        if (_depth < MAX_MENU_DEPTH) {
             _menuStack[_depth] = _currentMenu;
             _depth++;
         }
@@ -151,21 +177,22 @@ void MenuSystem::draw() {
     
     // Draw title (current menu name) with underline
     const char* title = _currentMenu->getText();
-    _display->drawText(title, 64, 0, 1, TextAlign::CENTER);
-    _display->drawText("──────────", 64, 7, 1, TextAlign::CENTER);
+    uint8_t centerX = _display->getWidth() / 2;
+    _display->drawText(title, centerX, TITLE_Y, 1, TextAlign::CENTER);
+    _display->drawText("__________", centerX, TITLE_UNDERLINE_Y, 1, TextAlign::CENTER);
     
     // Get current menu items
     MenuItem** items = getCurrentMenuItems();
     uint8_t itemCount = getCurrentMenuItemCount();
     
     if (itemCount == 0) {
-        _display->drawText("Empty", 64, 30, 1, TextAlign::CENTER);
+        _display->drawText("Empty", EMPTY_MSG_X, EMPTY_MSG_Y, 1, TextAlign::CENTER);
         _display->update();
         return;
     }
     
-    // Draw visible items - FIX HERE
-    int16_t startY = 16;
+    // Draw visible items
+    int16_t startY = ITEM_START_Y;
     uint8_t remaining = itemCount - _scrollOffset;
     uint8_t visibleCount = (remaining < _maxVisibleItems) ? remaining : _maxVisibleItems;
     
@@ -190,43 +217,65 @@ void MenuSystem::drawMenuItem(MenuItem* item, int16_t y, bool selected) {
     
     // Selection box
     if (selected) {
-        _display->drawMenuBox(0, y - 1, 127, ITEM_HEIGHT - 1, true);
+        _display->drawMenuBox(0, y + ITEM_BOX_Y_OFFSET, ITEM_BOX_WIDTH, ITEM_HEIGHT - 1, true);
         // Leading arrow to emphasize current selection
-        _display->drawText(">", 2, y + 2, 1);
+        _display->drawText(">", ITEM_ARROW_X, y + ITEM_TEXT_OFFSET_Y, 1);
     }
     
     // Item text
-    int16_t textX = selected ? 10 : 4;
-    _display->drawText(item->getText(), textX, y + 2, 1);
+    int16_t textX = selected ? ITEM_TEXT_X_SELECTED : ITEM_TEXT_X;
+    _display->drawText(item->getText(), textX, y + ITEM_TEXT_OFFSET_Y, 1);
     
     // Type-specific indicators
     if (item->hasChildren()) {
         // Submenu indicator
-        _display->drawText(">", 120, y + 2, 1);
+        _display->drawText(">", ITEM_RIGHT_INDICATOR_X, y + ITEM_TEXT_OFFSET_Y, 1);
     } else if (item->getType() == MenuItemType::VALUE) {
         // Value display
         char valueStr[8];
         snprintf(valueStr, sizeof(valueStr), "%d", item->getValue());
-        _display->drawText(valueStr, 110, y + 2, 1, TextAlign::RIGHT);
+        _display->drawText(valueStr, ITEM_VALUE_X, y + ITEM_TEXT_OFFSET_Y, 1, TextAlign::RIGHT);
+
+        // If in edit mode and this is the selected item, show a small edit tag
+        if (selected && _editMode) {
+            _display->drawText("E", ITEM_RIGHT_INDICATOR_X, y + ITEM_TEXT_OFFSET_Y, 1);
+        }
     } else if (item->getType() == MenuItemType::TOGGLE) {
         // Toggle state
         const char* state = item->getValue() ? "ON" : "OFF";
-        _display->drawText(state, 110, y + 2, 1, TextAlign::RIGHT);
+        _display->drawText(state, ITEM_VALUE_X, y + ITEM_TEXT_OFFSET_Y, 1, TextAlign::RIGHT);
+
+        if (selected && _editMode) {
+            _display->drawText("E", ITEM_RIGHT_INDICATOR_X, y + ITEM_TEXT_OFFSET_Y, 1);
+        }
     }
 }
 
 void MenuSystem::drawScrollIndicators() {
     uint8_t itemCount = getCurrentMenuItemCount();
-    
-    // Up arrow
-    if (_scrollOffset > 0) {
-        _display->drawText("^", 120, 12, 1);
+    if (itemCount <= _maxVisibleItems) {
+        return;
     }
-    
-    // Down arrow
-    if (_scrollOffset + _maxVisibleItems < itemCount) {
-        _display->drawText("v", 120, 56, 1);
+
+    // Simple vertical scrollbar on the right edge
+    int16_t trackX = SCROLLBAR_X;
+    int16_t trackY = ITEM_START_Y;
+    uint8_t trackHeight = _maxVisibleItems * ITEM_HEIGHT;
+
+    // Draw scrollbar track
+    _display->drawMenuBox(trackX, trackY, SCROLLBAR_WIDTH, trackHeight, false);
+
+    // Thumb height proportional to visible items
+    uint8_t thumbHeight = (uint8_t)max<int>(SCROLLBAR_MIN_THUMB, (trackHeight * _maxVisibleItems) / itemCount);
+
+    // Thumb position based on scroll offset
+    uint8_t maxOffset = itemCount - _maxVisibleItems;
+    uint8_t thumbY = trackY;
+    if (maxOffset > 0) {
+        thumbY = trackY + (trackHeight - thumbHeight) * _scrollOffset / maxOffset;
     }
+
+    _display->drawMenuBox(trackX, thumbY, SCROLLBAR_WIDTH, thumbHeight, true);
 }
 
 // ============================================================================
