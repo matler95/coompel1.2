@@ -45,7 +45,6 @@
 // MOTION SENSOR (MPU6050)
 // ============================================================================
 #define MPU6050_I2C_ADDRESS 0x68  // Default address (0x69 if AD0=HIGH)
-#define MOTION_INT_PIN      10    // Interrupt pin for motion events
 
 // ============================================================================
 // TOUCH SENSOR (TTP223)
@@ -55,9 +54,7 @@
 
 
 // Gesture Detection Thresholds
-#define ACCEL_THRESHOLD_TAP     2.5f   // G-force for tap detection
 #define ACCEL_THRESHOLD_SHAKE   8.0f   // G-force for shake
-#define GYRO_THRESHOLD_TILT     100.0f // deg/s for orientation change
 
 // ============================================================================
 // ANALOG SENSORS
@@ -68,13 +65,8 @@
 // ============================================================================
 // AUDIO FEEDBACK
 // ============================================================================
-#define BUZZER_PIN          5     // Piezo buzzer (PWM capable)
+// TBC
 
-// ============================================================================
-// STATUS INDICATORS
-// ============================================================================
-#define LED_STATUS_PIN      8     // Status LED
-#define LED_ERROR_PIN       9     // Error indicator LED
 
 // ============================================================================
 // POWER MANAGEMENT

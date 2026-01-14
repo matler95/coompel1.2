@@ -179,30 +179,6 @@ public:
      */
     void drawBitmapCentered(const uint8_t* bitmap, uint8_t width, uint8_t height);
     
-    // ========================================================================
-    // ANIMATION SUPPORT
-    // ========================================================================
-    
-    /**
-     * @brief Play animation frame
-     * @param frameIndex Which frame to display
-     * @param totalFrames Total number of frames in animation
-     * @return true if frame displayed, false if out of range
-     */
-    bool playAnimationFrame(uint8_t frameIndex, uint8_t totalFrames);
-    
-    /**
-     * @brief Update animation (call in loop)
-     * @param deltaTime Time since last update (milliseconds)
-     * @return Current frame number
-     */
-    uint8_t updateAnimation(unsigned long deltaTime);
-    
-    /**
-     * @brief Set animation frame rate
-     * @param fps Frames per second (1-30)
-     */
-    void setAnimationFPS(uint8_t fps);
     
     // ========================================================================
     // UI ELEMENTS

@@ -32,7 +32,6 @@ enum class AppMode {
     ANIMATIONS,
     MENU,
     SENSORS,
-    MOTION_TEST
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
@@ -78,7 +77,6 @@ struct Settings {
 MenuItem mainMenu("Main Menu");
 MenuItem animationsMenu("Animations");
 MenuItem sensorsMenu("Sensors");
-MenuItem motionTestMenu("Motion Test");
 MenuItem settingsMenu("Settings");
 MenuItem test1Menu("Test 1");
 MenuItem test2Menu("Test 2");
@@ -103,7 +101,6 @@ MenuItem soundLevelItem("Sound Level");
 void setupMenu();
 void onMenuStateChange(MenuItem* item);
 void onEncoderEvent(EncoderEvent event, int32_t position);
-void onEncoderEvent(EncoderEvent event, int32_t position);
 void onButtonEvent(ButtonEvent event);
 void onTouchEvent(TouchEvent event);
 void onMotionEvent(MotionEvent event);
@@ -115,7 +112,6 @@ void scheduleNextWinkCheck();
 void updateAnimationsMode();
 void updateMenuMode();
 void updateSensorsMode();
-void updateMotionTestMode();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
@@ -230,9 +226,6 @@ void loop() {
         case AppMode::SENSORS:
             updateSensorsMode();
             break;
-        case AppMode::MOTION_TEST:
-            updateMotionTestMode();
-            break;
     }
     
     delay(10);
@@ -292,7 +285,6 @@ void scheduleNextWinkCheck() {
 void setupMenu() {
     mainMenu.addChild(&animationsMenu);
     mainMenu.addChild(&sensorsMenu);
-    // mainMenu.addChild(&motionTestMenu);  // Disabled - motion features work fine
     mainMenu.addChild(&settingsMenu);
     mainMenu.addChild(&test1Menu);
     mainMenu.addChild(&test2Menu);
@@ -313,7 +305,6 @@ void setupMenu() {
     sensorsMenu.addChild(&tempHumidItem);
     sensorsMenu.addChild(&soundLevelItem);
     
-    motionTestMenu.setType(MenuItemType::ACTION);
     
     brightnessItem.setType(MenuItemType::VALUE);
     // Ensure brightness starts on a valid 10% step between 10 and 100
@@ -333,7 +324,6 @@ void setupMenu() {
     mainMenu.setID(MenuItemID::MAIN_MENU);
     animationsMenu.setID(MenuItemID::ANIMATIONS_MENU);
     sensorsMenu.setID(MenuItemID::SENSORS_MENU);
-    motionTestMenu.setID(MenuItemID::MOTION_TEST_MENU);
     settingsMenu.setID(MenuItemID::SETTINGS_MENU);
     test1Menu.setID(MenuItemID::TEST1);
     test2Menu.setID(MenuItemID::TEST2);
@@ -560,10 +550,6 @@ void onMenuStateChange(MenuItem* item) {
             currentMode = AppMode::SENSORS;
             break;
 
-        case MenuItemID::MOTION_TEST_MENU:
-            currentMode = AppMode::MOTION_TEST;
-            break;
-
         default:
             break;
     }
@@ -734,32 +720,5 @@ void updateSensorsMode() {
         display.drawProgressBar(0, 40, 127, 6, soundPercent / 100.0f);
     }
 
-    display.update();
-}
-
-void updateMotionTestMode() {
-    static unsigned long lastUpdate = 0;
-    
-    if (millis() - lastUpdate < 100) return;
-    lastUpdate = millis();
-    
-    display.clear();
-    display.showTextCentered("MOTION TEST", 0, 1);
-    
-    if (isShaking) {
-        display.showTextCentered("SHAKING!", 24, 2);
-    } else {
-        display.showTextCentered("Shake me!", 24, 1);
-    }
-    
-    float magnitude = motion.getAccelMagnitude();
-    char buffer[32];
-    snprintf(buffer, sizeof(buffer), "Accel: %.1f", magnitude);
-    display.drawText(buffer, 0, 40, 1);
-    
-    float progress = min(magnitude / 30.0f, 1.0f);
-    display.drawProgressBar(0, 50, 127, 6, progress);
-    
-    display.drawText("Hold=Menu", 64, 58, 1, TextAlign::CENTER);
     display.update();
 }

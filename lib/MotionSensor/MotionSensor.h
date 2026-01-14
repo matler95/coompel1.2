@@ -208,7 +208,6 @@ private:
     MotionCallback _callback;
     
     // Private methods
-    void detectTap();
     void detectShake();
     void detectSuddenMovement();
     Orientation calculateOrientation();

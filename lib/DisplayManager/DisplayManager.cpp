@@ -177,45 +177,6 @@ void DisplayManager::drawBitmapCentered(const uint8_t* bitmap,
     drawBitmap(bitmap, x, y, width, height, SH110X_WHITE);
 }
 
-// ============================================================================
-// ANIMATION SUPPORT
-// ============================================================================
-
-bool DisplayManager::playAnimationFrame(uint8_t frameIndex, uint8_t totalFrames) {
-    if (!_initialized || frameIndex >= totalFrames) return false;
-    
-    _currentFrame = frameIndex;
-    _totalFrames = totalFrames;
-    
-    // For now, just show a placeholder
-    // In Phase 7, we'll load actual bitmap frames
-    clear();
-    char frameText[32];
-    snprintf(frameText, sizeof(frameText), "Frame %d/%d", frameIndex + 1, totalFrames);
-    showTextCentered(frameText, 28, 1);
-    update();
-    
-    return true;
-}
-
-uint8_t DisplayManager::updateAnimation(unsigned long deltaTime) {
-    if (!_initialized || _totalFrames == 0) return 0;
-    
-    _lastFrameTime += deltaTime;
-    unsigned long frameDelay = 1000 / _animationFPS;
-    
-    if (_lastFrameTime >= frameDelay) {
-        _lastFrameTime = 0;
-        _currentFrame = (_currentFrame + 1) % _totalFrames;
-        playAnimationFrame(_currentFrame, _totalFrames);
-    }
-    
-    return _currentFrame;
-}
-
-void DisplayManager::setAnimationFPS(uint8_t fps) {
-    _animationFPS = constrain(fps, 1, 30);
-}
 
 // ============================================================================
 // UI ELEMENTS
