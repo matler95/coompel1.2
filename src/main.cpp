@@ -569,6 +569,11 @@ void resetMenuTimeout() {
 
 void checkMenuTimeout() {
     if (millis() - lastMenuActivity > MENU_TIMEOUT_MS) {
+        if (!menuSystem.isAtRoot()) {
+                    Serial.println("[MENU] Timeout - going back to root menu");
+                    currentMode = AppMode::MENU;
+                    menuSystem.init(&mainMenu);
+        }
         Serial.println("[MENU] Timeout - returning to animations");
         currentMode = AppMode::ANIMATIONS;
         // Show base frame immediately

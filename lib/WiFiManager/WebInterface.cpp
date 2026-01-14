@@ -192,7 +192,6 @@ const char PROGMEM html_setup[] = R"rawliteral(
             <h1>WiFi Setup</h1>
             <p class="subtitle">Configure your device connection</p>
 
-            <div id="status" class="status"></div>
 
             <h2>Available Networks</h2>
             <div id="networks"></div>
@@ -202,6 +201,7 @@ const char PROGMEM html_setup[] = R"rawliteral(
                 <input type="text" id="ssid" placeholder="Network Name (SSID)" required autocomplete="off">
                 <input type="password" id="password" placeholder="Password (leave empty for open networks)" autocomplete="off">
                 <button type="submit" id="connectBtn">Save</button>
+            <div id="status" class="status"></div>
             </form>
         </div>
         <div class="footer">
@@ -296,12 +296,12 @@ const char PROGMEM html_setup[] = R"rawliteral(
                 } else {
                     showStatus('Connection failed: ' + (result.message || 'Unknown error'), 'error');
                     btn.disabled = false;
-                    btn.innerHTML = 'Connect';
+                    btn.innerHTML = 'Save';
                 }
             } catch (error) {
                 showStatus('Request failed. Please try again.', 'error');
                 btn.disabled = false;
-                btn.innerHTML = 'Connect';
+                btn.innerHTML = 'Save';
             }
         };
 
