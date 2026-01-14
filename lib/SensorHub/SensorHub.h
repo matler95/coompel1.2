@@ -6,7 +6,6 @@
  * Manages all analog and digital sensors:
  * - DHT11 (temperature/humidity)
  * - HW-484 sound sensor
- * - Potentiometer
  * - Battery monitoring (future)
  */
 
@@ -34,11 +33,7 @@ struct SensorData {
     uint16_t soundLevel;    // Raw ADC value (0-4095)
     uint16_t soundPeak;     // Peak level in last period
     float soundDB;          // Approximate decibels
-    
-    // Potentiometer data
-    uint16_t potValue;      // Raw ADC value (0-4095)
-    uint8_t potPercent;     // Percentage (0-100)
-    
+     
     // Battery (future)
     uint16_t batteryLevel;
     uint8_t batteryPercent;
@@ -64,10 +59,9 @@ public:
      * @brief Initialize all sensors
      * @param dhtPin DHT11 data pin
      * @param soundPin HW-484 analog pin
-     * @param potPin Potentiometer analog pin
      * @return true if at least one sensor initialized
      */
-    bool init(uint8_t dhtPin, uint8_t soundPin, uint8_t potPin);
+    bool init(uint8_t dhtPin, uint8_t soundPin);
     
     /**
      * @brief Update all sensor readings (call in loop)
@@ -120,19 +114,7 @@ public:
      * @return Peak value
      */
     uint16_t getSoundPeak() const { return _data.soundPeak; }
-    
-    /**
-     * @brief Get potentiometer value (0-4095)
-     * @return Pot raw value
-     */
-    uint16_t getPotValue() const { return _data.potValue; }
-    
-    /**
-     * @brief Get potentiometer as percentage (0-100)
-     * @return Pot percentage
-     */
-    uint8_t getPotPercent() const { return _data.potPercent; }
-    
+        
     /**
      * @brief Set DHT update interval
      * @param intervalMs Milliseconds between readings (min 2000)
@@ -164,14 +146,12 @@ public:
      */
     void enableDHT(bool enabled);
     void enableSound(bool enabled);
-    void enablePot(bool enabled);
     
     /**
      * @brief Check if sensors are initialized
      */
     bool isDHTReady() const { return _dhtEnabled && _dhtPin > 0; }
     bool isSoundReady() const { return _soundEnabled && _soundPin > 0; }
-    bool isPotReady() const { return _potEnabled && _potPin > 0; }
     
     /**
      * @brief Reset peak sound level
@@ -189,9 +169,7 @@ private:
     
     // Analog sensors
     uint8_t _soundPin;
-    uint8_t _potPin;
     bool _soundEnabled;
-    bool _potEnabled;
     unsigned long _lastAnalogRead;
     uint16_t _analogInterval;
     

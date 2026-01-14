@@ -87,13 +87,14 @@ MenuItem dizzyAnimItem("Dizzy");
 
 MenuItem tempHumidItem("Temp/Humidity");
 MenuItem soundLevelItem("Sound Level");
-MenuItem potValueItem("Potentiometer");
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
 void setupMenu();
 void onMenuStateChange(MenuItem* item);
+void onEncoderEvent(EncoderEvent event, int32_t position);
+void onEncoderEvent(EncoderEvent event, int32_t position);
 void onButtonEvent(ButtonEvent event);
 void onTouchEvent(TouchEvent event);
 void onMotionEvent(MotionEvent event);
@@ -135,24 +136,19 @@ void setup() {
     animator.showStaticFrame(AnimState::IDLE, 0);
     
     // Initialize sensors
-    sensors.init(DHT11_PIN, SOUND_SENSOR_PIN, POTENTIOMETER_PIN);
+    sensors.init(DHT11_PIN, SOUND_SENSOR_PIN);
 
     // Initialize input
-    #if USE_ROTARY_ENCODER
-    if (!input.initWithEncoder(ENCODER_CLK_PIN, ENCODER_DT_PIN, ENCODER_SW_PIN, BTN_BACK_PIN, ENCODER_STEPS_PER_DETENT)) {
+    // NOTE: Pass 0 for backPin unless you have a *separate* back button on a dedicated GPIO.
+    // Using the same GPIO as encoder CLK/DT will cause undefined behavior.
+    if (!input.initWithEncoder(ENCODER_CLK_PIN, ENCODER_DT_PIN, ENCODER_SW_PIN, 0, ENCODER_STEPS_PER_DETENT)) {
         Serial.println("[ERROR] Input failed!");
         while (1) delay(1000);
     }
+    // Use encoder button for select, and encoder rotation for navigation/value changes
     input.setButtonCallback(ButtonID::SELECT, onButtonEvent);
+    input.setEncoderCallback(onEncoderEvent);
     Serial.println("[INIT] Using rotary encoder for input");
-    #else
-    if (!input.init(BTN_SELECT_PIN, BTN_BACK_PIN)) {
-        Serial.println("[ERROR] Input failed!");
-        while (1) delay(1000);
-    }
-    input.setButtonCallback(ButtonID::SELECT, onButtonEvent);
-    Serial.println("[INIT] Using buttons + potentiometer for input");
-    #endif
     
     // Initialize motion sensor
     if (!motion.init(&Wire)) {
@@ -172,7 +168,6 @@ void setup() {
     
     // Setup menu
     setupMenu();
-    menuSystem.setAnalogDeadzone(3);
     display.setBrightness(settings.brightness);
     
     // Schedule first behaviors
@@ -300,14 +295,9 @@ void setupMenu() {
     
     tempHumidItem.setType(MenuItemType::ACTION);
     soundLevelItem.setType(MenuItemType::ACTION);
-    potValueItem.setType(MenuItemType::ACTION);
 
     sensorsMenu.addChild(&tempHumidItem);
     sensorsMenu.addChild(&soundLevelItem);
-    #if !USE_ROTARY_ENCODER
-    // Only add potentiometer menu item if not using encoder
-    sensorsMenu.addChild(&potValueItem);
-    #endif
     
     motionTestMenu.setType(MenuItemType::ACTION);
     
@@ -335,7 +325,6 @@ void setupMenu() {
 
     tempHumidItem.setID(MenuItemID::SENSOR_TEMP_HUM);
     soundLevelItem.setID(MenuItemID::SENSOR_SOUND);
-    potValueItem.setID(MenuItemID::SENSOR_POT);
 
     brightnessItem.setID(MenuItemID::SETTING_BRIGHTNESS);
     soundItem.setID(MenuItemID::SETTING_SOUND);
@@ -514,7 +503,6 @@ void onMenuStateChange(MenuItem* item) {
 
         case MenuItemID::SENSOR_TEMP_HUM:
         case MenuItemID::SENSOR_SOUND:
-        case MenuItemID::SENSOR_POT:
             currentMode = AppMode::SENSORS;
             break;
 
@@ -554,85 +542,53 @@ void onMenuStateChange(MenuItem* item) {
 // ============================================================================
 
 void updateMenuMode() {
-    static unsigned long lastUpdate = 0;
-    static int32_t lastEncoderPos = 0;
+    // In encoder mode we navigate via onEncoderEvent() callbacks.
+    // Here we just ensure the menu is drawn if needed (e.g., initial entry).
+    static bool firstDraw = true;
+    if (firstDraw || display.isDirty()) {
+        firstDraw = false;
+        menuSystem.draw();
+    }
+}
 
-    if (millis() - lastUpdate >= 50) {
-        lastUpdate = millis();
+// ============================================================================
+// ENCODER EVENT HANDLER
+// ============================================================================
 
-        #if USE_ROTARY_ENCODER
-        // Use rotary encoder for navigation
-        RotaryEncoder* encoder = input.getEncoder();
-        if (encoder != nullptr) {
-            int32_t currentPos = encoder->getPosition();
-            int32_t delta = currentPos - lastEncoderPos;
+void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
+    if (currentMode != AppMode::MENU) {
+        return;
+    }
 
-            if (delta != 0) {
-                lastEncoderPos = currentPos;
-
-                // Check if current item is a VALUE or TOGGLE type
-                MenuItem* currentItem = menuSystem.getCurrentItem();
-                if (currentItem != nullptr &&
-                    (currentItem->getType() == MenuItemType::VALUE ||
-                     currentItem->getType() == MenuItemType::TOGGLE)) {
-
-                    // Adjust value with encoder
-                    int currentValue = currentItem->getValue();
-                    int newValue = currentValue + delta;
-                    newValue = constrain(newValue, currentItem->getMinValue(), currentItem->getMaxValue());
-
-                    if (newValue != currentValue) {
-                        currentItem->setValue(newValue);
-
-                        // Apply the change immediately
-                        onMenuStateChange(currentItem);
-
-                        menuSystem.draw();
-                    }
-                } else {
-                    // Normal navigation mode - move by encoder delta
-                    if (delta > 0) {
-                        for (int i = 0; i < delta; i++) {
-                            menuSystem.navigate(MenuNav::DOWN);
-                        }
-                    } else {
-                        for (int i = 0; i < -delta; i++) {
-                            menuSystem.navigate(MenuNav::UP);
-                        }
-                    }
-                    menuSystem.draw();
-                }
-            }
-        }
-        #else
-        // Use potentiometer for navigation (legacy mode)
-        uint16_t potValue = sensors.getPotValue();
-
-        // Check if current item is a VALUE or TOGGLE type
+    // One detent -> one logical step
+    if (event == EncoderEvent::ROTATED_CW || event == EncoderEvent::ROTATED_CCW) {
         MenuItem* currentItem = menuSystem.getCurrentItem();
-        if (currentItem != nullptr &&
-            (currentItem->getType() == MenuItemType::VALUE ||
-             currentItem->getType() == MenuItemType::TOGGLE)) {
+        bool isValueItem = currentItem != nullptr &&
+                           (currentItem->getType() == MenuItemType::VALUE ||
+                            currentItem->getType() == MenuItemType::TOGGLE);
 
-            // Use potentiometer to adjust value directly
-            int minVal = currentItem->getMinValue();
-            int maxVal = currentItem->getMaxValue();
-            int newValue = map(potValue, 0, 4095, minVal, maxVal);
+        if (isValueItem) {
+            int step = (event == EncoderEvent::ROTATED_CW) ? 1 : -1;
+            int currentValue = currentItem->getValue();
+            int newValue = currentValue + step;
+            newValue = constrain(newValue, currentItem->getMinValue(), currentItem->getMaxValue());
 
-            if (newValue != currentItem->getValue()) {
+            if (newValue != currentValue) {
                 currentItem->setValue(newValue);
-
-                // Apply the change immediately
                 onMenuStateChange(currentItem);
-
                 menuSystem.draw();
             }
         } else {
-            // Normal navigation mode
-            menuSystem.navigateAnalog(potValue, 4095);
+            // Simple menu navigation: one item per detent
+            if (event == EncoderEvent::ROTATED_CW) {
+                menuSystem.navigate(MenuNav::DOWN);
+            } else {
+                menuSystem.navigate(MenuNav::UP);
+            }
             menuSystem.draw();
         }
-        #endif
+
+        resetMenuTimeout();
     }
 }
 
@@ -709,13 +665,6 @@ void updateSensorsMode() {
         display.drawProgressBar(0, 40, 127, 6, soundPercent / 100.0f);
     }
 
-    #if !USE_ROTARY_ENCODER
-    // Only show potentiometer if not using encoder
-    if (sensors.isPotReady()) {
-        snprintf(buffer, sizeof(buffer), "Pot: %d%%", data.potPercent);
-        display.drawText(buffer, 0, 50, 1);
-    }
-    #endif
 
     display.drawText("Hold=Menu", 64, 58, 1, TextAlign::CENTER);
     display.update();

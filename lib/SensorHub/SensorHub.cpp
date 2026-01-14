@@ -17,9 +17,7 @@ SensorHub::SensorHub()
       _dhtInterval(2000),  // DHT11 requires 2 second minimum
       _lastTemperature(0),
       _soundPin(0),
-      _potPin(0),
       _soundEnabled(false),
-      _potEnabled(false),
       _lastAnalogRead(0),
       _analogInterval(100),  // 10 Hz for analog
       _soundSampleIndex(0),
@@ -35,8 +33,6 @@ SensorHub::SensorHub()
     _data.soundLevel = 0;
     _data.soundPeak = 0;
     _data.soundDB = 0;
-    _data.potValue = 0;
-    _data.potPercent = 0;
     _data.batteryLevel = 0;
     _data.batteryPercent = 0;
     
@@ -46,7 +42,7 @@ SensorHub::SensorHub()
     }
 }
 
-bool SensorHub::init(uint8_t dhtPin, uint8_t soundPin, uint8_t potPin) {
+bool SensorHub::init(uint8_t dhtPin, uint8_t soundPin) {
     Serial.println("[SENSOR] Initializing Sensor Hub...");
     
     bool anyInitialized = false;
@@ -73,16 +69,7 @@ bool SensorHub::init(uint8_t dhtPin, uint8_t soundPin, uint8_t potPin) {
         anyInitialized = true;
         Serial.printf("[SENSOR] Sound sensor on GPIO%d\n", soundPin);
     }
-    
-    // Initialize potentiometer
-    if (potPin > 0) {
-        _potPin = potPin;
-        _potEnabled = true;
-        pinMode(_potPin, INPUT);
-        anyInitialized = true;
-        Serial.printf("[SENSOR] Potentiometer on GPIO%d\n", potPin);
-    }
-    
+        
     if (anyInitialized) {
         Serial.println("[SENSOR] Sensor Hub ready");
     } else {
@@ -106,7 +93,7 @@ void SensorHub::update(bool forceUpdate) {
     }
     
     // Update analog sensors (fast, 100ms interval)
-    if ((_soundEnabled || _potEnabled) && 
+    if ((_soundEnabled) && 
         (forceUpdate || (currentTime - _lastAnalogRead >= _analogInterval))) {
         updateAnalogSensors();
         _lastAnalogRead = currentTime;
@@ -161,12 +148,6 @@ void SensorHub::updateAnalogSensors() {
             _soundCallback(_data.soundLevel);
         }
     }
-    
-    // Read potentiometer
-    if (_potEnabled) {
-        _data.potValue = analogRead(_potPin);
-        _data.potPercent = map(_data.potValue, 0, 4095, 0, 100);
-    }
 }
 
 void SensorHub::processSoundLevel(uint16_t rawValue) {
@@ -212,10 +193,6 @@ void SensorHub::enableDHT(bool enabled) {
 
 void SensorHub::enableSound(bool enabled) {
     _soundEnabled = enabled;
-}
-
-void SensorHub::enablePot(bool enabled) {
-    _potEnabled = enabled;
 }
 
 void SensorHub::resetSoundPeak() {

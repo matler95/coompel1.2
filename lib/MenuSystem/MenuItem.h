@@ -56,7 +56,6 @@ enum class MenuItemID : uint16_t {
     // Sensor items
     SENSOR_TEMP_HUM = 21,
     SENSOR_SOUND = 22,
-    SENSOR_POT = 23,
 
     // Settings items
     SETTING_BRIGHTNESS = 41,

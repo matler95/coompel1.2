@@ -96,18 +96,6 @@ public:
      */
     void returnToRoot();
 
-    /**
-     * @brief Navigate using analog value (potentiometer/encoder)
-     * @param value Analog input (0-4095 or 0-100)
-     * @param maxValue Maximum input value (4095 for ADC, 100 for percent)
-     */
-    void navigateAnalog(uint16_t value, uint16_t maxValue = 4095);
-
-    /**
-     * @brief Set deadzone for analog navigation
-     * @param percent Deadzone percentage (0-20, default 5)
-     */
-    void setAnalogDeadzone(uint8_t percent);
 
 private:
     DisplayManager* _display;
@@ -136,8 +124,6 @@ private:
     void drawScrollIndicators();
     MenuItem** getCurrentMenuItems();
     uint8_t getCurrentMenuItemCount();
-    uint16_t _lastAnalogValue;
-    uint8_t _analogDeadzone;  // Percentage
 };
 
 #endif // MENU_SYSTEM_H

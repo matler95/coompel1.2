@@ -20,9 +20,7 @@ MenuSystem::MenuSystem(DisplayManager* display)
       _selectedIndex(0),
       _scrollOffset(0),
       _maxVisibleItems(5),
-      _stateCallback(nullptr),
-      _lastAnalogValue(0),        // ADD THIS
-      _analogDeadzone(5)          // ADD THIS (5% deadzone)
+      _stateCallback(nullptr)
 {
 }
 
@@ -275,42 +273,4 @@ void MenuSystem::returnToRoot() {
     _scrollOffset = 0;
 }
 
-// ============================================================================
-// ANALOG NAVIGATION
-// ============================================================================
-
-void MenuSystem::navigateAnalog(uint16_t value, uint16_t maxValue) {
-    uint8_t itemCount = getCurrentMenuItemCount();
-    if (itemCount == 0) return;
-    
-    // Map analog value to menu items with deadzone
-    uint16_t deadzoneValue = (maxValue * _analogDeadzone) / 100;
-    
-    // Apply deadzone at edges
-    uint16_t adjustedValue = value;
-    if (value < deadzoneValue) {
-        adjustedValue = 0;
-    } else if (value > (maxValue - deadzoneValue)) {
-        adjustedValue = maxValue;
-    }
-    
-    // Map to menu index
-    uint8_t newIndex = map(adjustedValue, 0, maxValue, 0, itemCount - 1);
-    
-    // Only update if changed
-    if (newIndex != _selectedIndex) {
-        _selectedIndex = newIndex;
-        updateScrollOffset();
-        
-        // Trigger state callback
-        if (_stateCallback != nullptr) {
-            _stateCallback(getCurrentItem());
-        }
-    }
-    
-    _lastAnalogValue = value;
-}
-
-void MenuSystem::setAnalogDeadzone(uint8_t percent) {
-    _analogDeadzone = constrain(percent, 0, 20);
-}
+// Removed: legacy analog navigation (potentiometer-based) – encoder-only UX now.
