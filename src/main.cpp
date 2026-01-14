@@ -36,6 +36,9 @@ enum class AppMode {
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
+// Encoder edit mode: when true, rotating adjusts the current VALUE/TOGGLE item;
+// when false, rotating moves selection up/down.
+bool encoderEditMode = false;
 
 // ============================================================================
 // TIMING FOR NATURAL BEHAVIORS
@@ -59,11 +62,12 @@ const unsigned long MENU_TIMEOUT_MS = 10000;  // 10 seconds
 // SETTINGS
 // ============================================================================
 struct Settings {
+    // Brightness stored as percent (10-100), mapped to 0-255 for the display
     uint8_t brightness;
     bool soundEnabled;
     uint8_t motionSensitivity;
 } settings = {
-    .brightness = 255,
+    .brightness = 100,   // 100% user brightness
     .soundEnabled = true,
     .motionSensitivity = 5
 };
@@ -77,7 +81,8 @@ MenuItem sensorsMenu("Sensors");
 MenuItem motionTestMenu("Motion Test");
 MenuItem settingsMenu("Settings");
 
-MenuItem brightnessItem("Brightness", 255, 0, 255);
+// Brightness as user-facing percent (10-100, in steps of 10)
+MenuItem brightnessItem("Brightness", 100, 10, 100);
 MenuItem soundItem("Sound", 1, 0, 1);
 MenuItem sensitivityItem("Sensitivity", 5, 1, 10);
 
@@ -110,6 +115,7 @@ void updateMotionTestMode();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
+void applyBrightnessFromSettings();
 
 // ============================================================================
 // SETUP
@@ -168,7 +174,7 @@ void setup() {
     
     // Setup menu
     setupMenu();
-    display.setBrightness(settings.brightness);
+    applyBrightnessFromSettings();
     
     // Schedule first behaviors
     scheduleNextBlink();
@@ -302,6 +308,9 @@ void setupMenu() {
     motionTestMenu.setType(MenuItemType::ACTION);
     
     brightnessItem.setType(MenuItemType::VALUE);
+    // Ensure brightness starts on a valid 10% step between 10 and 100
+    settings.brightness = constrain(settings.brightness, 10, 100);
+    settings.brightness = (settings.brightness / 10) * 10;
     brightnessItem.setValue(settings.brightness);
     soundItem.setType(MenuItemType::TOGGLE);
     soundItem.setValue(settings.soundEnabled ? 1 : 0);
@@ -351,13 +360,27 @@ void onButtonEvent(ButtonEvent event) {
         
         switch (event) {
             case ButtonEvent::CLICK:
-                menuSystem.navigate(MenuNav::SELECT);
-                menuSystem.draw();
+                // In menu mode, CLICK either toggles encoder edit mode for VALUE/TOGGLE
+                // items, or performs normal SELECT (enter submenu / run action).
+                {
+                    MenuItem* currentItem = menuSystem.getCurrentItem();
+                    if (currentItem != nullptr &&
+                        (currentItem->getType() == MenuItemType::VALUE ||
+                         currentItem->getType() == MenuItemType::TOGGLE)) {
+                        // Toggle edit mode
+                        encoderEditMode = !encoderEditMode;
+                        menuSystem.draw();
+                    } else {
+                        menuSystem.navigate(MenuNav::SELECT);
+                        menuSystem.draw();
+                    }
+                }
                 break;
                 
             case ButtonEvent::LONG_PRESS:
                 if (menuSystem.isAtRoot()) {
                     currentMode = AppMode::ANIMATIONS;
+                    encoderEditMode = false;
                     Serial.println("[NAV] Exited menu");
                 } else {
                     menuSystem.navigate(MenuNav::BACK);
@@ -372,6 +395,7 @@ void onButtonEvent(ButtonEvent event) {
         if (event == ButtonEvent::LONG_PRESS) {
             currentMode = AppMode::MENU;
             resetMenuTimeout();
+            encoderEditMode = false;
             menuSystem.draw();
         }
     }
@@ -474,6 +498,21 @@ void checkMenuTimeout() {
 }
 
 // ============================================================================
+// BRIGHTNESS HELPER
+// ============================================================================
+
+void applyBrightnessFromSettings() {
+    // settings.brightness is 10–100% in steps of 10
+    uint8_t percent = constrain(settings.brightness, 10, 100);
+    percent = (percent / 10) * 10;
+    settings.brightness = percent;
+
+    // Map 10–100% to a usable contrast range (approx. 10–100% of 255)
+    uint8_t level = map(percent, 10, 100, 26, 255);
+    display.setBrightness(level);
+}
+
+// ============================================================================
 // MENU STATE CALLBACK
 // ============================================================================
 
@@ -516,10 +555,12 @@ void onMenuStateChange(MenuItem* item) {
 
     // Handle settings changes
     switch (itemID) {
-        case MenuItemID::SETTING_BRIGHTNESS:
-            settings.brightness = item->getValue();
-            display.setBrightness(settings.brightness);
+        case MenuItemID::SETTING_BRIGHTNESS: {
+            // Item value is user-facing percent (10-100 in steps of 10)
+            settings.brightness = (uint8_t)item->getValue();
+            applyBrightnessFromSettings();
             break;
+        }
 
         case MenuItemID::SETTING_SOUND:
             settings.soundEnabled = item->getValue() == 1;
@@ -567,9 +608,19 @@ void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
                            (currentItem->getType() == MenuItemType::VALUE ||
                             currentItem->getType() == MenuItemType::TOGGLE);
 
-        if (isValueItem) {
+        if (encoderEditMode && isValueItem) {
+            // Edit mode: rotate to change the current VALUE/TOGGLE item
             int step = (event == EncoderEvent::ROTATED_CW) ? 1 : -1;
+
             int currentValue = currentItem->getValue();
+
+            // For brightness setting, use 10% steps (10,20,...,100)
+            if (currentItem->getID() == MenuItemID::SETTING_BRIGHTNESS) {
+                // Snap to nearest 10 and step by ±10
+                currentValue = (currentValue / 10) * 10;
+                step *= 10;
+            }
+
             int newValue = currentValue + step;
             newValue = constrain(newValue, currentItem->getMinValue(), currentItem->getMaxValue());
 
@@ -579,12 +630,14 @@ void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
                 menuSystem.draw();
             }
         } else {
-            // Simple menu navigation: one item per detent
+            // Navigation mode: rotate to move selection up/down
             if (event == EncoderEvent::ROTATED_CW) {
                 menuSystem.navigate(MenuNav::DOWN);
             } else {
                 menuSystem.navigate(MenuNav::UP);
             }
+            // Leaving the current item cancels edit mode
+            encoderEditMode = false;
             menuSystem.draw();
         }
 
