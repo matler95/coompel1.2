@@ -14,6 +14,7 @@
 #include "AnimationEngine.h"
 #include "SensorHub.h"
 #include "WiFiManager.h"
+#include "GeoLocationClient.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -104,6 +105,13 @@ MenuItem wifiMenu("WiFi");
 MenuItem wifiConfigureItem("Configure");
 MenuItem wifiStatusItem("Status");
 MenuItem wifiForgetItem("Forget Network");
+
+// Weather menu items
+MenuItem weatherMenu("Weather");
+MenuItem weatherTestGeoItem("Test Location");
+MenuItem weatherEnableItem("Enable Weather");
+MenuItem weatherViewItem("View Forecast");
+MenuItem weatherPrivacyItem("Privacy Info");
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -345,6 +353,7 @@ void setupMenu() {
     settingsMenu.addChild(&soundItem);
     settingsMenu.addChild(&sensitivityItem);
     settingsMenu.addChild(&wifiMenu);
+    settingsMenu.addChild(&weatherMenu);
 
     // WiFi submenu
     wifiMenu.setType(MenuItemType::SUBMENU);
@@ -356,6 +365,18 @@ void setupMenu() {
     wifiMenu.addChild(&wifiConfigureItem);
     wifiMenu.addChild(&wifiStatusItem);
     wifiMenu.addChild(&wifiForgetItem);
+
+    // Setup weather menu
+    weatherMenu.setType(MenuItemType::SUBMENU);
+    weatherTestGeoItem.setType(MenuItemType::ACTION);
+    weatherEnableItem.setType(MenuItemType::ACTION);
+    weatherViewItem.setType(MenuItemType::ACTION);
+    weatherPrivacyItem.setType(MenuItemType::ACTION);
+
+    weatherMenu.addChild(&weatherTestGeoItem);
+    weatherMenu.addChild(&weatherEnableItem);
+    weatherMenu.addChild(&weatherViewItem);
+    weatherMenu.addChild(&weatherPrivacyItem);
 
     // Assign menu item IDs for fast lookup
     mainMenu.setID(MenuItemID::MAIN_MENU);
@@ -382,6 +403,12 @@ void setupMenu() {
     wifiConfigureItem.setID(MenuItemID::WIFI_CONFIGURE);
     wifiStatusItem.setID(MenuItemID::WIFI_STATUS);
     wifiForgetItem.setID(MenuItemID::WIFI_FORGET);
+
+    weatherMenu.setID(MenuItemID::SETTING_WEATHER);
+    weatherTestGeoItem.setID(MenuItemID::WEATHER_TEST_GEO);
+    weatherEnableItem.setID(MenuItemID::WEATHER_ENABLE);
+    weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
+    weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
 
     menuSystem.init(&mainMenu);
     menuSystem.setStateCallback(onMenuStateChange);
@@ -560,6 +587,35 @@ void applyBrightnessFromSettings() {
 }
 
 // ============================================================================
+// WEATHER HELPERS
+// ============================================================================
+
+void testGeolocation() {
+    if (!wifi.isConnected()) {
+        Serial.println("[Weather] Not connected to WiFi");
+        return;
+    }
+
+    Serial.println("[Weather] Testing geolocation...");
+    size_t heapBefore = ESP.getFreeHeap();
+
+    GeoLocationClient geoClient;
+    GeoLocation location;
+
+    if (geoClient.fetchLocation(location)) {
+        Serial.printf("[Weather] Success! Location: %.4f, %.4f\n",
+                      location.latitude, location.longitude);
+        Serial.printf("[Weather] City: %s, Country: %s\n",
+                      location.city, location.country);
+    } else {
+        Serial.println("[Weather] Geolocation failed");
+    }
+
+    size_t heapAfter = ESP.getFreeHeap();
+    Serial.printf("[Weather] Heap used: %d bytes\n", heapBefore - heapAfter);
+}
+
+// ============================================================================
 // MENU STATE CALLBACK
 // ============================================================================
 
@@ -605,6 +661,10 @@ void onMenuStateChange(MenuItem* item) {
             wifi.clearCredentials();
             wifi.disconnect();
             menuSystem.draw();  // Refresh display
+            break;
+
+        case MenuItemID::WEATHER_TEST_GEO:
+            testGeolocation();
             break;
 
         default:

@@ -201,7 +201,7 @@ const char PROGMEM html_setup[] = R"rawliteral(
             <form id="wifiForm">
                 <input type="text" id="ssid" placeholder="Network Name (SSID)" required autocomplete="off">
                 <input type="password" id="password" placeholder="Password (leave empty for open networks)" autocomplete="off">
-                <button type="submit" id="connectBtn">Connect</button>
+                <button type="submit" id="connectBtn">Save</button>
             </form>
         </div>
         <div class="footer">
@@ -276,7 +276,7 @@ const char PROGMEM html_setup[] = R"rawliteral(
             }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>Connecting...';
+            btn.innerHTML = 'Saved';
             showStatus('Connecting to ' + ssid + '...', 'info');
 
             try {

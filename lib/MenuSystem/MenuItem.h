@@ -69,7 +69,14 @@ enum class MenuItemID : uint16_t {
     SETTING_WIFI = 44,
     WIFI_CONFIGURE = 441,
     WIFI_STATUS = 442,
-    WIFI_FORGET = 443
+    WIFI_FORGET = 443,
+
+    // Weather items
+    SETTING_WEATHER = 45,
+    WEATHER_TEST_GEO = 451,
+    WEATHER_ENABLE = 452,
+    WEATHER_VIEW = 453,
+    WEATHER_PRIVACY = 454
 };
 
 // ============================================================================
