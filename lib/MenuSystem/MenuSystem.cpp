@@ -149,10 +149,10 @@ void MenuSystem::updateScrollOffset() {
 void MenuSystem::draw() {
     _display->clear();
     
-    // Draw title (current menu name)
+    // Draw title (current menu name) with underline
     const char* title = _currentMenu->getText();
     _display->drawText(title, 64, 0, 1, TextAlign::CENTER);
-    _display->drawText("__________", 64, 7, 1, TextAlign::CENTER);
+    _display->drawText("──────────", 64, 7, 1, TextAlign::CENTER);
     
     // Get current menu items
     MenuItem** items = getCurrentMenuItems();
@@ -191,10 +191,13 @@ void MenuSystem::drawMenuItem(MenuItem* item, int16_t y, bool selected) {
     // Selection box
     if (selected) {
         _display->drawMenuBox(0, y - 1, 127, ITEM_HEIGHT - 1, true);
+        // Leading arrow to emphasize current selection
+        _display->drawText(">", 2, y + 2, 1);
     }
     
-    // Item text (inverted if selected)
-    _display->drawText(item->getText(), 4, y + 2, 1);
+    // Item text
+    int16_t textX = selected ? 10 : 4;
+    _display->drawText(item->getText(), textX, y + 2, 1);
     
     // Type-specific indicators
     if (item->hasChildren()) {

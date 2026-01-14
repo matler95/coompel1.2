@@ -259,8 +259,9 @@ void DisplayManager::drawMenuBox(int16_t x, int16_t y, uint8_t width,
     if (!_initialized) return;
 
     if (selected) {
-        // Filled box for selected items
-        _display->fillRect(x, y, width, height, SH110X_WHITE);
+        // Highlighted selection: outline box with a solid left bar
+        _display->drawRect(x, y, width, height, SH110X_WHITE);
+        _display->fillRect(x, y, 3, height, SH110X_WHITE);
     } else {
         // Outline only for unselected
         _display->drawRect(x, y, width, height, SH110X_WHITE);
