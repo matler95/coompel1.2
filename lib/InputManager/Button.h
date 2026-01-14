@@ -131,8 +131,8 @@ private:
     uint16_t _doubleClickWindow;  // Double click max time (ms)
     
     // Flags
-    bool _pressedEdge;
-    bool _releasedEdge;
+    volatile bool _pressedEdge;
+    volatile bool _releasedEdge;
     bool _longPressTriggered;
     uint8_t _clickCount;
     

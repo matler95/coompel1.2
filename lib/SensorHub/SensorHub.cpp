@@ -59,10 +59,10 @@ bool SensorHub::init(uint8_t dhtPin, uint8_t soundPin, uint8_t potPin) {
         _dhtEnabled = true;
         anyInitialized = true;
         Serial.printf("[SENSOR] DHT11 on GPIO%d\n", dhtPin);
-        
-        // First reading (may be invalid)
-        delay(2000);
-        updateDHT();
+
+        // Schedule first reading after 2 seconds (non-blocking)
+        _lastDHTRead = millis() - _dhtInterval + 2000;
+        Serial.println("[SENSOR] DHT will be ready in 2 seconds");
     }
     
     // Initialize sound sensor

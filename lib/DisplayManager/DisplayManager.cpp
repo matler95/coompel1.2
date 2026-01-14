@@ -16,6 +16,7 @@ DisplayManager::DisplayManager(uint8_t width, uint8_t height, uint8_t i2c_addres
       _height(height),
       _i2c_address(i2c_address),
       _initialized(false),
+      _dirty(true),
       _currentFrame(0),
       _totalFrames(0),
       _animationFPS(10),
@@ -68,11 +69,13 @@ bool DisplayManager::init(uint8_t sda_pin, uint8_t scl_pin, uint32_t frequency) 
 void DisplayManager::clear() {
     if (!_initialized) return;
     _display->clearDisplay();
+    _dirty = true;
 }
 
 void DisplayManager::update() {
-    if (!_initialized) return;
+    if (!_initialized || !_dirty) return;
     _display->display();
+    _dirty = false;
 }
 
 void DisplayManager::clearAndUpdate() {
@@ -82,9 +85,13 @@ void DisplayManager::clearAndUpdate() {
 
 void DisplayManager::setBrightness(uint8_t level) {
     if (!_initialized) return;
-    // SH1106 doesn't have direct brightness control via library
-    // This is a placeholder for future implementation
-    // Would require sending raw commands to display controller
+
+    // SH1106 contrast control (0x81 command)
+    // Level: 0-255, where 255 is maximum brightness
+    _display->oled_command(0x81);  // Set contrast control
+    _display->oled_command(level);  // Contrast value
+
+    Serial.printf("[DISPLAY] Brightness set to %d\n", level);
 }
 
 void DisplayManager::setPower(bool on) {
@@ -96,16 +103,20 @@ void DisplayManager::setPower(bool on) {
     }
 }
 
+void DisplayManager::markDirty() {
+    _dirty = true;
+}
+
 // ============================================================================
 // TEXT RENDERING
 // ============================================================================
 
-void DisplayManager::drawText(const char* text, int16_t x, int16_t y, 
+void DisplayManager::drawText(const char* text, int16_t x, int16_t y,
                               uint8_t size, TextAlign align) {
     if (!_initialized || text == nullptr) return;
-    
+
     _display->setTextSize(size);
-    
+
     // Calculate alignment offset
     int16_t xPos = x;
     if (align != TextAlign::LEFT) {
@@ -116,9 +127,10 @@ void DisplayManager::drawText(const char* text, int16_t x, int16_t y,
             xPos = x - textWidth;
         }
     }
-    
+
     _display->setCursor(xPos, y);
     _display->print(text);
+    _dirty = true;
 }
 
 void DisplayManager::showTextCentered(const char* text, int16_t y, uint8_t size) {
@@ -128,22 +140,23 @@ void DisplayManager::showTextCentered(const char* text, int16_t y, uint8_t size)
 void DisplayManager::drawMultiLineText(const char* text, int16_t x, int16_t y,
                                        uint8_t size, uint8_t lineSpacing) {
     if (!_initialized || text == nullptr) return;
-    
+
     _display->setTextSize(size);
-    
+
     char buffer[64];
     strncpy(buffer, text, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
-    
+
     char* line = strtok(buffer, "\n");
     int16_t currentY = y;
-    
+
     while (line != nullptr) {
         _display->setCursor(x, currentY);
         _display->print(line);
         currentY += (8 * size) + lineSpacing;
         line = strtok(nullptr, "\n");
     }
+    _dirty = true;
 }
 
 // ============================================================================
@@ -154,6 +167,7 @@ void DisplayManager::drawBitmap(const uint8_t* bitmap, int16_t x, int16_t y,
                                 uint8_t width, uint8_t height, uint16_t color) {
     if (!_initialized || bitmap == nullptr) return;
     _display->drawBitmap(x, y, bitmap, width, height, color);
+    _dirty = true;
 }
 
 void DisplayManager::drawBitmapCentered(const uint8_t* bitmap, 
@@ -210,38 +224,40 @@ void DisplayManager::setAnimationFPS(uint8_t fps) {
 void DisplayManager::drawProgressBar(int16_t x, int16_t y, uint8_t width,
                                      uint8_t height, float progress) {
     if (!_initialized) return;
-    
+
     progress = constrain(progress, 0.0f, 1.0f);
-    
+
     // Draw outline
     _display->drawRect(x, y, width, height, SH110X_WHITE);
-    
+
     // Fill progress
     uint8_t fillWidth = mapProgressToPixels(progress, width - 2);
     if (fillWidth > 0) {
         _display->fillRect(x + 1, y + 1, fillWidth, height - 2, SH110X_WHITE);
     }
+    _dirty = true;
 }
 
 void DisplayManager::drawBattery(int16_t x, int16_t y, uint8_t percentage) {
     if (!_initialized) return;
-    
+
     // Battery body (20x10 pixels)
     _display->drawRect(x, y, 20, 10, SH110X_WHITE);
     // Battery tip
     _display->fillRect(x + 20, y + 3, 2, 4, SH110X_WHITE);
-    
+
     // Fill level
     uint8_t fillWidth = map(percentage, 0, 100, 0, 18);
     if (fillWidth > 0) {
         _display->fillRect(x + 1, y + 1, fillWidth, 8, SH110X_WHITE);
     }
+    _dirty = true;
 }
 
 void DisplayManager::drawMenuBox(int16_t x, int16_t y, uint8_t width,
                                  uint8_t height, bool selected) {
     if (!_initialized) return;
-    
+
     if (selected) {
         // Filled box for selected items
         _display->fillRect(x, y, width, height, SH110X_WHITE);
@@ -249,6 +265,7 @@ void DisplayManager::drawMenuBox(int16_t x, int16_t y, uint8_t width,
         // Outline only for unselected
         _display->drawRect(x, y, width, height, SH110X_WHITE);
     }
+    _dirty = true;
 }
 
 // ============================================================================

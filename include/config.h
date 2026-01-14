@@ -33,11 +33,20 @@
 // ============================================================================
 // INPUT CONFIGURATION
 // ============================================================================
-// Buttons
-#define BTN_SELECT_PIN      2     // Main select button
+// Rotary Encoder (KY-040) - replaces potentiometer + select button
+#define ENCODER_CLK_PIN         2     // Encoder CLK (output A) - GPIO2/D2
+#define ENCODER_DT_PIN          3     // Encoder DT (output B) - GPIO3/D3
+#define ENCODER_SW_PIN          4     // Encoder switch (button) - GPIO4
+#define ENCODER_STEPS_PER_DETENT 4    // Steps per detent (1=very sensitive, 2=medium, 4=one click per item)
+
+// Legacy button support (if not using encoder)
+#define BTN_SELECT_PIN      2     // Main select button (unused with encoder)
 #define BTN_BACK_PIN        3     // Back/cancel button
 #define BTN_DEBOUNCE_MS     50    // Debounce delay
 #define BTN_LONGPRESS_MS    1000  // Long press threshold
+
+// Input mode selection
+#define USE_ROTARY_ENCODER  true  // Set to true to use encoder, false for buttons+pot
 
 // ============================================================================
 // MOTION SENSOR (MPU6050)
@@ -60,9 +69,9 @@
 // ============================================================================
 // ANALOG SENSORS
 // ============================================================================
-#define SOUND_SENSOR_PIN    0     // HW-484 analog output
-#define POTENTIOMETER_PIN   1     // Brightness/volume control
-#define DHT11_PIN           4     // Digital pin for DHT11
+#define SOUND_SENSOR_PIN    0     // HW-484 analog output - GPIO0/ADC1-0
+#define POTENTIOMETER_PIN   1     // Brightness/volume control (unused with encoder) - GPIO1/ADC1-1
+#define DHT11_PIN           5     // Digital pin for DHT11 - GPIO5/D5
 
 // ============================================================================
 // AUDIO FEEDBACK

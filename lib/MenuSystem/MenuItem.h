@@ -36,6 +36,35 @@ enum class MenuItemType {
 };
 
 // ============================================================================
+// MENU ITEM IDENTIFIERS
+// ============================================================================
+enum class MenuItemID : uint16_t {
+    NONE = 0,
+
+    // Main menu items
+    MAIN_MENU = 1,
+    ANIMATIONS_MENU = 10,
+    SENSORS_MENU = 20,
+    MOTION_TEST_MENU = 30,
+    SETTINGS_MENU = 40,
+
+    // Animation items
+    ANIM_IDLE = 11,
+    ANIM_WINK = 12,
+    ANIM_DIZZY = 13,
+
+    // Sensor items
+    SENSOR_TEMP_HUM = 21,
+    SENSOR_SOUND = 22,
+    SENSOR_POT = 23,
+
+    // Settings items
+    SETTING_BRIGHTNESS = 41,
+    SETTING_SOUND = 42,
+    SETTING_SENSITIVITY = 43
+};
+
+// ============================================================================
 // MENU ITEM CLASS
 // ============================================================================
 class MenuItem {
@@ -75,7 +104,19 @@ public:
      * @return Pointer to text string
      */
     const char* getText() const { return _text; }
-    
+
+    /**
+     * @brief Set menu item ID
+     * @param id MenuItemID identifier
+     */
+    void setID(MenuItemID id) { _id = id; }
+
+    /**
+     * @brief Get menu item ID
+     * @return MenuItemID
+     */
+    MenuItemID getID() const { return _id; }
+
     /**
      * @brief Execute item action
      */
@@ -96,7 +137,19 @@ public:
      * @return Current value (for VALUE/TOGGLE types)
      */
     int getValue() const { return _value; }
-    
+
+    /**
+     * @brief Get minimum value
+     * @return Minimum value (for VALUE types)
+     */
+    int getMinValue() const { return _minValue; }
+
+    /**
+     * @brief Get maximum value
+     * @return Maximum value (for VALUE types)
+     */
+    int getMaxValue() const { return _maxValue; }
+
     /**
      * @brief Set value directly
      * @param value New value
@@ -148,16 +201,17 @@ private:
     const char* _text;
     MenuItemType _type;
     bool _enabled;
-    
+    MenuItemID _id;
+
     // Value properties
     int _value;
     int _minValue;
     int _maxValue;
-    
+
     // Callbacks
     MenuCallback _actionCallback;
     MenuValueCallback _valueCallback;
-    
+
     // Submenu children
     MenuItem** _children;
     uint8_t _childCount;

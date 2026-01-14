@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir \"c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2\\\\lib\" /b)"
+      "Bash(dir \"c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2\\\\lib\" /b)",
+      "Bash(pio run:*)"
     ]
   }
 }

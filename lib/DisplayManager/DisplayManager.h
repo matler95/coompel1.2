@@ -108,7 +108,18 @@ public:
      * @param on true to turn on, false to turn off
      */
     void setPower(bool on);
-    
+
+    /**
+     * @brief Mark display buffer as dirty (needs update)
+     */
+    void markDirty();
+
+    /**
+     * @brief Check if display buffer needs updating
+     * @return true if buffer has changed since last update
+     */
+    bool isDirty() const { return _dirty; }
+
     // ========================================================================
     // TEXT RENDERING
     // ========================================================================
@@ -283,7 +294,8 @@ private:
     uint8_t _height;              // Display height
     uint8_t _i2c_address;         // I2C address
     bool _initialized;            // Init status flag
-    
+    bool _dirty;                  // Track if buffer needs display update
+
     // Animation state
     uint8_t _currentFrame;        // Current animation frame
     uint8_t _totalFrames;         // Total frames in animation
