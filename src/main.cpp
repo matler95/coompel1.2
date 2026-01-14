@@ -15,6 +15,7 @@
 #include "SensorHub.h"
 #include "WiFiManager.h"
 #include "GeoLocationClient.h"
+#include "WeatherClient.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -109,6 +110,7 @@ MenuItem wifiForgetItem("Forget Network");
 // Weather menu items
 MenuItem weatherMenu("Weather");
 MenuItem weatherTestGeoItem("Test Location");
+MenuItem weatherTestForecastItem("Test Forecast");
 MenuItem weatherEnableItem("Enable Weather");
 MenuItem weatherViewItem("View Forecast");
 MenuItem weatherPrivacyItem("Privacy Info");
@@ -369,11 +371,13 @@ void setupMenu() {
     // Setup weather menu
     weatherMenu.setType(MenuItemType::SUBMENU);
     weatherTestGeoItem.setType(MenuItemType::ACTION);
+    weatherTestForecastItem.setType(MenuItemType::ACTION);
     weatherEnableItem.setType(MenuItemType::ACTION);
     weatherViewItem.setType(MenuItemType::ACTION);
     weatherPrivacyItem.setType(MenuItemType::ACTION);
 
     weatherMenu.addChild(&weatherTestGeoItem);
+    weatherMenu.addChild(&weatherTestForecastItem);
     weatherMenu.addChild(&weatherEnableItem);
     weatherMenu.addChild(&weatherViewItem);
     weatherMenu.addChild(&weatherPrivacyItem);
@@ -406,6 +410,7 @@ void setupMenu() {
 
     weatherMenu.setID(MenuItemID::SETTING_WEATHER);
     weatherTestGeoItem.setID(MenuItemID::WEATHER_TEST_GEO);
+    weatherTestForecastItem.setID(MenuItemID::WEATHER_TEST_FORECAST);
     weatherEnableItem.setID(MenuItemID::WEATHER_ENABLE);
     weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
     weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
@@ -615,6 +620,50 @@ void testGeolocation() {
     Serial.printf("[Weather] Heap used: %d bytes\n", heapBefore - heapAfter);
 }
 
+void testWeatherForecast() {
+    if (!wifi.isConnected()) {
+        Serial.println("[Weather] Not connected to WiFi");
+        return;
+    }
+
+    Serial.println("[Weather] Testing weather forecast...");
+    size_t heapBefore = ESP.getFreeHeap();
+
+    // First get location
+    GeoLocationClient geoClient;
+    GeoLocation location;
+
+    if (!geoClient.fetchLocation(location)) {
+        Serial.println("[Weather] Failed to get location");
+        return;
+    }
+
+    Serial.printf("[Weather] Location: %.4f, %.4f (%s, %s)\n",
+                  location.latitude, location.longitude,
+                  location.city, location.country);
+
+    // Now get weather forecast
+    WeatherClient weatherClient;
+    WeatherForecast forecast;
+
+    if (weatherClient.fetchForecast(location.latitude, location.longitude, forecast)) {
+        Serial.println("[Weather] Forecast fetched successfully!");
+        for (int i = 0; i < forecast.dayCount; i++) {
+            Serial.printf("[Weather] %s: %.1f-%.1f°C, %.0f%% humidity, %s\n",
+                          forecast.days[i].date,
+                          forecast.days[i].tempMin,
+                          forecast.days[i].tempMax,
+                          forecast.days[i].humidity,
+                          forecast.days[i].symbolCode);
+        }
+    } else {
+        Serial.println("[Weather] Failed to fetch forecast");
+    }
+
+    size_t heapAfter = ESP.getFreeHeap();
+    Serial.printf("[Weather] Total heap used: %d bytes\n", heapBefore - heapAfter);
+}
+
 // ============================================================================
 // MENU STATE CALLBACK
 // ============================================================================
@@ -665,6 +714,10 @@ void onMenuStateChange(MenuItem* item) {
 
         case MenuItemID::WEATHER_TEST_GEO:
             testGeolocation();
+            break;
+
+        case MenuItemID::WEATHER_TEST_FORECAST:
+            testWeatherForecast();
             break;
 
         default:

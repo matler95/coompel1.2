@@ -74,9 +74,10 @@ enum class MenuItemID : uint16_t {
     // Weather items
     SETTING_WEATHER = 45,
     WEATHER_TEST_GEO = 451,
-    WEATHER_ENABLE = 452,
-    WEATHER_VIEW = 453,
-    WEATHER_PRIVACY = 454
+    WEATHER_TEST_FORECAST = 452,
+    WEATHER_ENABLE = 453,
+    WEATHER_VIEW = 454,
+    WEATHER_PRIVACY = 455
 };
 
 // ============================================================================
