@@ -78,7 +78,10 @@ enum class MenuItemID : uint16_t {
     WEATHER_ENABLE = 453,
     WEATHER_VIEW = 454,
     WEATHER_PRIVACY = 455,
-    WEATHER_ABOUT = 456
+    WEATHER_ABOUT = 456,
+
+    // Clock items
+    CLOCK_VIEW = 48
 };
 
 // ============================================================================

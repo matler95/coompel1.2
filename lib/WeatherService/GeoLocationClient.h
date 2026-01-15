@@ -8,7 +8,8 @@ struct GeoLocation {
     float latitude = 0.0f;
     float longitude = 0.0f;
     char city[32] = {0};
-    char country[3] = {0};  // ISO 3166-1 alpha-2 code
+    char country[3] = {0};      // ISO 3166-1 alpha-2 code
+    int32_t timezoneOffset = 0; // UTC offset in seconds (for NTP)
     bool valid = false;
 };
 

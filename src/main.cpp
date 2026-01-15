@@ -37,11 +37,12 @@ enum class AppMode {
     ANIMATIONS,
     MENU,
     SENSORS,
-    WIFI_SETUP,    // Show captive portal connection info
-    WIFI_INFO,     // Show connection status details
-    WEATHER_VIEW,  // Show weather forecast
-    WEATHER_ABOUT, // Show weather data attribution
-    WEATHER_PRIVACY // Show privacy info for weather feature
+    WIFI_SETUP,     // Show captive portal connection info
+    WIFI_INFO,      // Show connection status details
+    WEATHER_VIEW,   // Show weather forecast
+    WEATHER_ABOUT,  // Show weather data attribution
+    WEATHER_PRIVACY,// Show privacy info for weather feature
+    CLOCK_VIEW      // Show live clock
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
@@ -50,6 +51,8 @@ AppMode currentMode = AppMode::ANIMATIONS;
 bool encoderEditMode = false;
 // Weather view page: 0 = overview, 1-4 = individual day details
 uint8_t weatherViewPage = 0;
+// NTP time sync state
+bool ntpConfigured = false;
 
 // ============================================================================
 // TIMING FOR NATURAL BEHAVIORS
@@ -120,6 +123,9 @@ MenuItem weatherViewItem("View Forecast");
 MenuItem weatherPrivacyItem("Privacy Info");
 MenuItem weatherAboutItem("About");
 
+// Clock menu item
+MenuItem clockItem("Clock");
+
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
@@ -142,6 +148,8 @@ void updateWiFiInfoMode();
 void updateWeatherViewMode();
 void updateWeatherAboutMode();
 void updateWeatherPrivacyMode();
+void updateClockViewMode();
+void configureNTP();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
@@ -282,6 +290,9 @@ void loop() {
         case AppMode::WEATHER_PRIVACY:
             updateWeatherPrivacyMode();
             break;
+        case AppMode::CLOCK_VIEW:
+            updateClockViewMode();
+            break;
     }
 
     delay(10);
@@ -339,6 +350,7 @@ void scheduleNextWinkCheck() {
 // ============================================================================
 
 void setupMenu() {
+    mainMenu.addChild(&clockItem);
     mainMenu.addChild(&animationsMenu);
     mainMenu.addChild(&sensorsMenu);
     mainMenu.addChild(&settingsMenu);
@@ -346,6 +358,10 @@ void setupMenu() {
     mainMenu.addChild(&test2Menu);
     mainMenu.addChild(&test3Menu);
     mainMenu.addChild(&test4Menu);
+
+    // Clock item setup
+    clockItem.setType(MenuItemType::ACTION);
+    clockItem.setID(MenuItemID::CLOCK_VIEW);
     
     idleAnimItem.setType(MenuItemType::ACTION);
     winkAnimItem.setType(MenuItemType::ACTION);
@@ -755,6 +771,11 @@ void onMenuStateChange(MenuItem* item) {
             Serial.println("[NAV] Entered weather about");
             break;
 
+        case MenuItemID::CLOCK_VIEW:
+            currentMode = AppMode::CLOCK_VIEW;
+            Serial.println("[NAV] Entered clock view");
+            break;
+
         default:
             break;
     }
@@ -1117,7 +1138,6 @@ void updateWeatherViewMode() {
             display.drawText("available", 0, 32, 1);
         }
 
-        display.drawText("[Hold to exit]", 0, 56, 1);
         display.update();
         return;
     }
@@ -1226,8 +1246,7 @@ void updateWeatherAboutMode() {
     display.drawText("yr.no", 0, 40, 1);
 
     // Footer hint
-    display.drawText("[Hold to exit]", 0, 56, 1);
-
+    
     display.update();
 }
 
@@ -1252,7 +1271,70 @@ void updateWeatherPrivacyMode() {
     display.drawText("location only.", 0, 44, 1);
 
     // Footer hint
-    display.drawText("[Hold to exit]", 0, 56, 1);
+    
+    display.update();
+}
 
+// ============================================================================
+// NTP TIME CONFIGURATION
+// ============================================================================
+
+void configureNTP() {
+    if (ntpConfigured) return;
+
+    // Get timezone offset from geolocation (default to UTC if not available)
+    int32_t gmtOffset = 0;
+    if (weatherService.getLocation().valid) {
+        gmtOffset = weatherService.getLocation().timezoneOffset;
+    }
+
+    // Configure NTP with timezone (no DST adjustment - handled by offset)
+    configTime(gmtOffset, 0, "pool.ntp.org", "time.nist.gov");
+    ntpConfigured = true;
+
+    Serial.printf("[Time] NTP configured, GMT offset: %ld sec\n", gmtOffset);
+}
+
+// ============================================================================
+// CLOCK VIEW MODE - Live clock display
+// ============================================================================
+
+void updateClockViewMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 500) return;  // Update 2x per second
+    lastUpdate = millis();
+
+    // Ensure NTP is configured
+    if (!ntpConfigured && wifi.isConnected()) {
+        configureNTP();
+    }
+
+    display.clear();
+
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo, 100)) {
+        // No time available
+        display.showTextCentered("No Time", 10, 2);
+        display.drawText("Connect WiFi", 20, 32, 1);
+        display.drawText("to sync time", 20, 42, 1);
+    } else {
+        // Time (large, centered)
+        char timeStr[16];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        display.showTextCentered(timeStr, 8, 2);
+
+        // Weekday (centered)
+        char dayStr[16];
+        strftime(dayStr, sizeof(dayStr), "%A", &timeinfo);
+        display.showTextCentered(dayStr, 30, 1);
+
+        // Date (centered)
+        char dateStr[24];
+        strftime(dateStr, sizeof(dateStr), "%d %B %Y", &timeinfo);
+        display.showTextCentered(dateStr, 42, 1);
+    }
+
+    // Footer hint
+    
     display.update();
 }

@@ -9,7 +9,10 @@
       "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev\")",
       "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 30\")",
       "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 40\")",
-      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 20\")"
+      "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 20\")",
+      "Bash(cmd /c \"cd /d c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2 && C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe run\")",
+      "Bash(cmd /c:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

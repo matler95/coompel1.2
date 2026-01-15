@@ -162,6 +162,15 @@ bool GeoLocationClient::parseResponse(const String& json, GeoLocation& location)
         }
     }
 
+    // Extract timezone offset (ipwho.is provides timezone.offset in seconds)
+    if (doc.containsKey("timezone")) {
+        JsonObject tz = doc["timezone"];
+        if (tz.containsKey("offset")) {
+            location.timezoneOffset = tz["offset"].as<int32_t>();
+            Serial.printf("[GeoLocation] Timezone offset: %ld sec\n", location.timezoneOffset);
+        }
+    }
+
     location.valid = true;
     return true;
 }
