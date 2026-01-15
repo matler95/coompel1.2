@@ -42,7 +42,8 @@ enum class AppMode {
     WEATHER_VIEW,   // Show weather forecast
     WEATHER_ABOUT,  // Show weather data attribution
     WEATHER_PRIVACY,// Show privacy info for weather feature
-    CLOCK_VIEW      // Show live clock
+    CLOCK_VIEW,     // Show live clock
+    POMODORO_VIEW   // Pomodoro timer
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
@@ -53,6 +54,17 @@ bool encoderEditMode = false;
 uint8_t weatherViewPage = 0;
 // NTP time sync state
 bool ntpConfigured = false;
+
+// Pomodoro timer state
+enum class PomodoroState { IDLE, WORK_RUNNING, WORK_PAUSED, BREAK_RUNNING, BREAK_PAUSED };
+PomodoroState pomodoroState = PomodoroState::IDLE;
+uint32_t pomodoroTargetMs = 0;        // When current session ends (millis)
+uint32_t pomodoroPausedRemaining = 0; // Remaining time when paused
+uint8_t pomodoroCount = 0;            // Completed work sessions (0-8)
+
+// Pomodoro timing constants
+constexpr uint32_t POMODORO_WORK_MS = 25UL * 60UL * 1000UL;   // 25 minutes
+constexpr uint32_t POMODORO_BREAK_MS = 5UL * 60UL * 1000UL;   // 5 minutes
 
 // ============================================================================
 // TIMING FOR NATURAL BEHAVIORS
@@ -126,6 +138,9 @@ MenuItem weatherAboutItem("About");
 // Clock menu item
 MenuItem clockItem("Clock");
 
+// Pomodoro menu item
+MenuItem pomodoroItem("Pomodoro");
+
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
@@ -150,6 +165,11 @@ void updateWeatherAboutMode();
 void updateWeatherPrivacyMode();
 void updateClockViewMode();
 void configureNTP();
+void updatePomodoroViewMode();
+void drawPomodoroRing(float progress);
+void drawPomodoroCount(uint8_t count);
+void setupBuzzer();
+void pomodoroBeep();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
@@ -183,6 +203,9 @@ void setup() {
     
     // Initialize sensors
     sensors.init(DHT11_PIN, SOUND_SENSOR_PIN);
+
+    // Initialize buzzer for audio feedback
+    setupBuzzer();
 
     // Initialize input
     // NOTE: Pass 0 for backPin unless you have a *separate* back button on a dedicated GPIO.
@@ -293,6 +316,9 @@ void loop() {
         case AppMode::CLOCK_VIEW:
             updateClockViewMode();
             break;
+        case AppMode::POMODORO_VIEW:
+            updatePomodoroViewMode();
+            break;
     }
 
     delay(10);
@@ -351,6 +377,7 @@ void scheduleNextWinkCheck() {
 
 void setupMenu() {
     mainMenu.addChild(&clockItem);
+    mainMenu.addChild(&pomodoroItem);
     mainMenu.addChild(&animationsMenu);
     mainMenu.addChild(&sensorsMenu);
     mainMenu.addChild(&settingsMenu);
@@ -362,7 +389,11 @@ void setupMenu() {
     // Clock item setup
     clockItem.setType(MenuItemType::ACTION);
     clockItem.setID(MenuItemID::CLOCK_VIEW);
-    
+
+    // Pomodoro item setup
+    pomodoroItem.setType(MenuItemType::ACTION);
+    pomodoroItem.setID(MenuItemID::POMODORO_VIEW);
+
     idleAnimItem.setType(MenuItemType::ACTION);
     winkAnimItem.setType(MenuItemType::ACTION);
     dizzyAnimItem.setType(MenuItemType::ACTION);
@@ -503,6 +534,50 @@ void onButtonEvent(ButtonEvent event) {
                 
             default:
                 break;
+        }
+    } else if (currentMode == AppMode::POMODORO_VIEW) {
+        // Pomodoro timer controls
+        if (event == ButtonEvent::CLICK) {
+            // Toggle pause/resume or start
+            switch (pomodoroState) {
+                case PomodoroState::IDLE:
+                    pomodoroState = PomodoroState::WORK_RUNNING;
+                    pomodoroTargetMs = millis() + POMODORO_WORK_MS;
+                    Serial.println("[Pomodoro] Work session started");
+                    break;
+                case PomodoroState::WORK_RUNNING:
+                    pomodoroPausedRemaining = pomodoroTargetMs - millis();
+                    pomodoroState = PomodoroState::WORK_PAUSED;
+                    Serial.printf("[Pomodoro] Paused at %lu:%02lu\n",
+                                  (pomodoroPausedRemaining / 1000) / 60,
+                                  (pomodoroPausedRemaining / 1000) % 60);
+                    break;
+                case PomodoroState::WORK_PAUSED:
+                    pomodoroTargetMs = millis() + pomodoroPausedRemaining;
+                    pomodoroState = PomodoroState::WORK_RUNNING;
+                    Serial.println("[Pomodoro] Resumed");
+                    break;
+                case PomodoroState::BREAK_RUNNING:
+                    pomodoroPausedRemaining = pomodoroTargetMs - millis();
+                    pomodoroState = PomodoroState::BREAK_PAUSED;
+                    Serial.println("[Pomodoro] Break paused");
+                    break;
+                case PomodoroState::BREAK_PAUSED:
+                    pomodoroTargetMs = millis() + pomodoroPausedRemaining;
+                    pomodoroState = PomodoroState::BREAK_RUNNING;
+                    Serial.println("[Pomodoro] Break resumed");
+                    break;
+            }
+        } else if (event == ButtonEvent::LONG_PRESS) {
+            // Stop and reset timer completely, then exit
+            pomodoroState = PomodoroState::IDLE;
+            pomodoroTargetMs = 0;
+            pomodoroPausedRemaining = 0;
+            pomodoroCount = 0;
+            Serial.println("[Pomodoro] Timer stopped and reset");
+            currentMode = AppMode::MENU;
+            resetMenuTimeout();
+            menuSystem.draw();
         }
     } else {
         if (event == ButtonEvent::LONG_PRESS) {
@@ -774,6 +849,11 @@ void onMenuStateChange(MenuItem* item) {
         case MenuItemID::CLOCK_VIEW:
             currentMode = AppMode::CLOCK_VIEW;
             Serial.println("[NAV] Entered clock view");
+            break;
+
+        case MenuItemID::POMODORO_VIEW:
+            currentMode = AppMode::POMODORO_VIEW;
+            Serial.println("[NAV] Entered pomodoro timer");
             break;
 
         default:
@@ -1335,6 +1415,140 @@ void updateClockViewMode() {
     }
 
     // Footer hint
-    
+
+    display.update();
+}
+
+// ============================================================================
+// POMODORO TIMER
+// ============================================================================
+
+void setupBuzzer() {
+    ledcSetup(0, 2000, 8);        // Channel 0, 2kHz default, 8-bit resolution
+    ledcAttachPin(BUZZER_PIN, 0);
+    ledcWrite(0, 0);              // Start silent
+}
+
+void pomodoroBeep() {
+    if (!settings.soundEnabled) return;
+
+    // Double beep pattern
+    for (int i = 0; i < 2; i++) {
+        ledcWriteTone(0, 2000);   // 2kHz tone
+        delay(100);
+        ledcWriteTone(0, 0);      // Silence
+        delay(100);
+    }
+}
+
+void drawPomodoroRing(float progress) {
+    Adafruit_SH1106G* d = display.getRawDisplay();
+
+    int16_t cx = 64, cy = 30, r = 24;
+
+    // Outer ring (thin)
+    d->drawCircle(cx, cy, r, SH110X_WHITE);
+
+    // Progress dots around ring
+    int totalDots = 30;  // Number of segments
+    int filledDots = (int)(progress * totalDots);
+
+    for (int i = 0; i < totalDots; i++) {
+        float angle = ((float)i / totalDots) * 2.0f * PI - PI / 2.0f;
+        int16_t x = cx + (int16_t)(cos(angle) * r);
+        int16_t y = cy + (int16_t)(sin(angle) * r);
+
+        if (i < filledDots) {
+            d->fillCircle(x, y, 2, SH110X_WHITE);  // Filled
+        } else {
+            d->drawPixel(x, y, SH110X_WHITE);       // Dot
+        }
+    }
+}
+
+void drawPomodoroCount(uint8_t count) {
+    // Draw small filled circles for completed pomodoros (monochrome)
+    Adafruit_SH1106G* d = display.getRawDisplay();
+    for (int i = 0; i < count && i < 8; i++) {
+        int16_t x = 90 + (i % 4) * 10;
+        int16_t y = 2 + (i / 4) * 8;
+        d->fillCircle(x, y + 3, 3, SH110X_WHITE);
+    }
+}
+
+void updatePomodoroViewMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 100) return;  // 10 FPS
+    lastUpdate = millis();
+
+    uint32_t now = millis();
+    uint32_t remaining = 0;
+    float progress = 0.0f;
+    bool isBreak = (pomodoroState == PomodoroState::BREAK_RUNNING ||
+                    pomodoroState == PomodoroState::BREAK_PAUSED);
+
+    // Calculate remaining time and progress based on state
+    if (pomodoroState == PomodoroState::IDLE) {
+        remaining = POMODORO_WORK_MS;  // Show full 25:00
+        progress = 0.0f;
+    } else if (pomodoroState == PomodoroState::WORK_RUNNING ||
+               pomodoroState == PomodoroState::BREAK_RUNNING) {
+        remaining = (pomodoroTargetMs > now) ? (pomodoroTargetMs - now) : 0;
+        uint32_t total = isBreak ? POMODORO_BREAK_MS : POMODORO_WORK_MS;
+        progress = 1.0f - ((float)remaining / total);
+
+        // Auto-transition when done
+        if (remaining == 0) {
+            pomodoroBeep();  // Sound alert
+            if (!isBreak) {
+                pomodoroCount++;
+                pomodoroState = PomodoroState::BREAK_RUNNING;
+                pomodoroTargetMs = now + POMODORO_BREAK_MS;
+                Serial.println("[Pomodoro] Work complete! Starting break");
+            } else {
+                pomodoroState = PomodoroState::WORK_RUNNING;
+                pomodoroTargetMs = now + POMODORO_WORK_MS;
+                Serial.printf("[Pomodoro] Break complete! Starting work #%d\n", pomodoroCount + 1);
+            }
+        }
+    } else if (pomodoroState == PomodoroState::WORK_PAUSED ||
+               pomodoroState == PomodoroState::BREAK_PAUSED) {
+        remaining = pomodoroPausedRemaining;
+        uint32_t total = isBreak ? POMODORO_BREAK_MS : POMODORO_WORK_MS;
+        progress = 1.0f - ((float)remaining / total);
+    }
+
+    display.clear();
+
+    // Header: Mode label
+    const char* modeLabel = isBreak ? "BREAK" : "WORK";
+    display.drawText(modeLabel, 4, 0, 1);
+
+    // Pomodoro count icons
+    drawPomodoroCount(pomodoroCount);
+
+    // Draw circular progress ring
+    drawPomodoroRing(progress);
+
+    // Time in center of ring (MM:SS)
+    uint32_t secs = remaining / 1000;
+    char timeStr[8];
+    snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", secs / 60, secs % 60);
+    display.showTextCentered(timeStr, 26, 2);
+
+    // Status inside ring
+    const char* status = "";
+    switch (pomodoroState) {
+        case PomodoroState::IDLE: status = "START"; break;
+        case PomodoroState::WORK_RUNNING: status = "FOCUS"; break;
+        case PomodoroState::WORK_PAUSED: status = "PAUSED"; break;
+        case PomodoroState::BREAK_RUNNING: status = "RELAX"; break;
+        case PomodoroState::BREAK_PAUSED: status = "PAUSED"; break;
+    }
+    display.showTextCentered(status, 44, 1);
+
+    // Footer controls
+    display.drawText("[Click:Pause] [Hold:Stop]", 0, 56, 1);
+
     display.update();
 }

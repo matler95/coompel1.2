@@ -81,7 +81,10 @@ enum class MenuItemID : uint16_t {
     WEATHER_ABOUT = 456,
 
     // Clock items
-    CLOCK_VIEW = 48
+    CLOCK_VIEW = 48,
+
+    // Pomodoro timer
+    POMODORO_VIEW = 49
 };
 
 // ============================================================================
