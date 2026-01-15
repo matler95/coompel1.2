@@ -9,6 +9,18 @@ static constexpr unsigned long WIFI_CONNECT_TIMEOUT = 30000;   // 30s
 static constexpr unsigned long WIFI_RECONNECT_DELAY = 30000;   // 30s
 static constexpr uint8_t WIFI_MAX_RETRIES = 3;
 
+// NVS namespace and keys for device config
+static constexpr const char* NVS_CONFIG_NS = "config";
+static constexpr const char* KEY_SETUP_COMPLETE = "setup_ok";
+static constexpr const char* KEY_WIFI_ENABLED = "wifi_en";
+static constexpr const char* KEY_GEO_ENABLED = "geo_en";
+static constexpr const char* KEY_WEATHER_ENABLED = "wx_en";
+static constexpr const char* KEY_NTP_ENABLED = "ntp_en";
+static constexpr const char* KEY_MANUAL_TZ = "manual_tz";
+static constexpr const char* KEY_TERMS_OK = "terms_ok";
+static constexpr const char* KEY_PRIVACY_OK = "privacy_ok";
+static constexpr const char* KEY_CONSENT_TIME = "consent_ts";
+
 // --------------------------------------------------
 // Constructor / Destructor
 // --------------------------------------------------
@@ -30,10 +42,22 @@ bool WiFiManager::init() {
 
     generateAPName();
     loadCredentials();
+    loadDeviceConfig();
 
-    if (_config.configured && strlen(_config.ssid) > 0) {
+    // If setup not complete, always start captive portal
+    if (!_deviceConfig.setupComplete) {
+        Serial.println("[WiFi] Setup not complete, starting captive portal");
+        startCaptivePortal();
+        return true;
+    }
+
+    // Setup complete - check if WiFi is enabled and configured
+    if (_deviceConfig.wifiEnabled && _config.configured && strlen(_config.ssid) > 0) {
         Serial.printf("[WiFi] Stored SSID found: %s\n", _config.ssid);
         connect();
+    } else if (!_deviceConfig.wifiEnabled) {
+        Serial.println("[WiFi] WiFi disabled by user, staying offline");
+        _state = WiFiState::IDLE;
     } else {
         Serial.println("[WiFi] No credentials found, starting AP mode");
         startCaptivePortal();
@@ -362,4 +386,95 @@ void WiFiManager::setupWebInterface() {
     delete _webInterface;
     _webInterface = new WebInterface(this);
     _webInterface->setupRoutes(_webServer);
+}
+
+// --------------------------------------------------
+// Device Configuration (Setup Wizard)
+// --------------------------------------------------
+
+void WiFiManager::loadDeviceConfig() {
+    Preferences prefs;
+    prefs.begin(NVS_CONFIG_NS, true);
+
+    _deviceConfig.setupComplete = prefs.getBool(KEY_SETUP_COMPLETE, false);
+    _deviceConfig.wifiEnabled = prefs.getBool(KEY_WIFI_ENABLED, true);
+    _deviceConfig.geolocationEnabled = prefs.getBool(KEY_GEO_ENABLED, true);
+    _deviceConfig.weatherEnabled = prefs.getBool(KEY_WEATHER_ENABLED, true);
+    _deviceConfig.ntpEnabled = prefs.getBool(KEY_NTP_ENABLED, true);
+    _deviceConfig.manualTimezoneOffset = prefs.getInt(KEY_MANUAL_TZ, 0);
+    _deviceConfig.termsAccepted = prefs.getBool(KEY_TERMS_OK, false);
+    _deviceConfig.privacyAccepted = prefs.getBool(KEY_PRIVACY_OK, false);
+    _deviceConfig.consentTimestamp = prefs.getUInt(KEY_CONSENT_TIME, 0);
+
+    prefs.end();
+
+    Serial.printf("[WiFi] Config loaded: setup=%d, wifi=%d, geo=%d, wx=%d, ntp=%d\n",
+                  _deviceConfig.setupComplete,
+                  _deviceConfig.wifiEnabled,
+                  _deviceConfig.geolocationEnabled,
+                  _deviceConfig.weatherEnabled,
+                  _deviceConfig.ntpEnabled);
+}
+
+void WiFiManager::saveDeviceConfig(const DeviceConfig& config) {
+    _deviceConfig = config;
+
+    Preferences prefs;
+    prefs.begin(NVS_CONFIG_NS, false);
+
+    prefs.putBool(KEY_SETUP_COMPLETE, _deviceConfig.setupComplete);
+    prefs.putBool(KEY_WIFI_ENABLED, _deviceConfig.wifiEnabled);
+    prefs.putBool(KEY_GEO_ENABLED, _deviceConfig.geolocationEnabled);
+    prefs.putBool(KEY_WEATHER_ENABLED, _deviceConfig.weatherEnabled);
+    prefs.putBool(KEY_NTP_ENABLED, _deviceConfig.ntpEnabled);
+    prefs.putInt(KEY_MANUAL_TZ, _deviceConfig.manualTimezoneOffset);
+    prefs.putBool(KEY_TERMS_OK, _deviceConfig.termsAccepted);
+    prefs.putBool(KEY_PRIVACY_OK, _deviceConfig.privacyAccepted);
+    prefs.putUInt(KEY_CONSENT_TIME, _deviceConfig.consentTimestamp);
+
+    prefs.end();
+
+    Serial.println("[WiFi] Device config saved");
+}
+
+void WiFiManager::factoryReset() {
+    Serial.println("[WiFi] Factory reset - clearing all data");
+
+    // Clear WiFi credentials
+    clearCredentials();
+
+    // Clear device config
+    Preferences prefs;
+    prefs.begin(NVS_CONFIG_NS, false);
+    prefs.clear();
+    prefs.end();
+
+    // Reset in-memory config
+    _deviceConfig = DeviceConfig();
+
+    Serial.println("[WiFi] Factory reset complete - restarting");
+    delay(500);
+    ESP.restart();
+}
+
+void WiFiManager::resetSetupWizard() {
+    Serial.println("[WiFi] Resetting setup wizard");
+
+    // Only reset setup complete flag, keep WiFi credentials
+    _deviceConfig.setupComplete = false;
+    _deviceConfig.termsAccepted = false;
+    _deviceConfig.privacyAccepted = false;
+    _deviceConfig.consentTimestamp = 0;
+
+    Preferences prefs;
+    prefs.begin(NVS_CONFIG_NS, false);
+    prefs.putBool(KEY_SETUP_COMPLETE, false);
+    prefs.putBool(KEY_TERMS_OK, false);
+    prefs.putBool(KEY_PRIVACY_OK, false);
+    prefs.putUInt(KEY_CONSENT_TIME, 0);
+    prefs.end();
+
+    Serial.println("[WiFi] Setup wizard reset - restarting");
+    delay(500);
+    ESP.restart();
 }

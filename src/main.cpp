@@ -135,6 +135,11 @@ MenuItem weatherViewItem("View Forecast");
 MenuItem weatherPrivacyItem("Privacy Info");
 MenuItem weatherAboutItem("About");
 
+// System menu items (factory reset, re-run setup)
+MenuItem systemMenu("System");
+MenuItem rerunSetupItem("Re-run Setup");
+MenuItem factoryResetItem("Factory Reset");
+
 // Clock menu item
 MenuItem clockItem("Clock");
 
@@ -174,6 +179,8 @@ void pomodoroBeep();
 void resetMenuTimeout();
 void checkMenuTimeout();
 void applyBrightnessFromSettings();
+void applyDeviceConfig();
+void showSetupRequiredScreen();
 void onWiFiEvent(WiFiEvent event);
 void drawWiFiStatusIcon();
 
@@ -239,9 +246,19 @@ void setup() {
     setupMenu();
     applyBrightnessFromSettings();
 
-    // Initialize WiFi
+    // Initialize WiFi (this loads device config internally)
     wifi.init();
     wifi.setEventCallback(onWiFiEvent);
+
+    // Check if initial setup is complete
+    if (!wifi.isSetupComplete()) {
+        Serial.println("[INIT] Setup wizard not complete - showing setup screen");
+        showSetupRequiredScreen();
+        currentMode = AppMode::WIFI_SETUP;
+    } else {
+        Serial.println("[INIT] Setup complete - applying device config");
+        applyDeviceConfig();
+    }
 
     // Initialize weather service
     weatherService.init();
@@ -249,7 +266,7 @@ void setup() {
     // Schedule first behaviors
     scheduleNextBlink();
     scheduleNextWinkCheck();
-    
+
     Serial.println("\n[INIT] System ready!");
     Serial.println("Natural behaviors:");
     Serial.println("  - Random blinks");
@@ -424,6 +441,7 @@ void setupMenu() {
     settingsMenu.addChild(&sensitivityItem);
     settingsMenu.addChild(&wifiMenu);
     settingsMenu.addChild(&weatherMenu);
+    settingsMenu.addChild(&systemMenu);
 
     // WiFi submenu
     wifiMenu.setType(MenuItemType::SUBMENU);
@@ -448,6 +466,14 @@ void setupMenu() {
     weatherMenu.addChild(&weatherViewItem);
     weatherMenu.addChild(&weatherPrivacyItem);
     weatherMenu.addChild(&weatherAboutItem);
+
+    // Setup system menu (factory reset, re-run setup)
+    systemMenu.setType(MenuItemType::SUBMENU);
+    rerunSetupItem.setType(MenuItemType::ACTION);
+    factoryResetItem.setType(MenuItemType::ACTION);
+
+    systemMenu.addChild(&rerunSetupItem);
+    systemMenu.addChild(&factoryResetItem);
 
     // Assign menu item IDs for fast lookup
     mainMenu.setID(MenuItemID::MAIN_MENU);
@@ -480,6 +506,10 @@ void setupMenu() {
     weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
     weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
     weatherAboutItem.setID(MenuItemID::WEATHER_ABOUT);
+
+    systemMenu.setID(MenuItemID::SETTING_SYSTEM);
+    rerunSetupItem.setID(MenuItemID::SYSTEM_RERUN_SETUP);
+    factoryResetItem.setID(MenuItemID::SYSTEM_FACTORY_RESET);
 
     menuSystem.init(&mainMenu);
     menuSystem.setStateCallback(onMenuStateChange);
@@ -854,6 +884,16 @@ void onMenuStateChange(MenuItem* item) {
         case MenuItemID::POMODORO_VIEW:
             currentMode = AppMode::POMODORO_VIEW;
             Serial.println("[NAV] Entered pomodoro timer");
+            break;
+
+        case MenuItemID::SYSTEM_RERUN_SETUP:
+            Serial.println("[NAV] Re-running setup wizard");
+            wifi.resetSetupWizard();  // Will restart device
+            break;
+
+        case MenuItemID::SYSTEM_FACTORY_RESET:
+            Serial.println("[NAV] Factory reset initiated");
+            wifi.factoryReset();  // Will restart device
             break;
 
         default:
@@ -1551,4 +1591,50 @@ void updatePomodoroViewMode() {
     display.drawText("[Click:Pause] [Hold:Stop]", 0, 56, 1);
 
     display.update();
+}
+
+// ============================================================================
+// DEVICE CONFIGURATION HELPERS
+// ============================================================================
+
+void showSetupRequiredScreen() {
+    display.clear();
+    display.showTextCentered("Setup", 8, 2);
+    display.drawText("Connect to:", 16, 32, 1);
+    display.showTextCentered(wifi.getAPName().c_str(), 44, 1);
+    display.update();
+}
+
+void applyDeviceConfig() {
+    const DeviceConfig& cfg = wifi.getDeviceConfig();
+
+    Serial.println("[Config] Applying device configuration:");
+    Serial.printf("  WiFi: %s\n", cfg.wifiEnabled ? "enabled" : "disabled");
+    Serial.printf("  Geolocation: %s\n", cfg.geolocationEnabled ? "enabled" : "disabled");
+    Serial.printf("  Weather: %s\n", cfg.weatherEnabled ? "enabled" : "disabled");
+    Serial.printf("  NTP: %s\n", cfg.ntpEnabled ? "enabled" : "disabled");
+    Serial.printf("  Manual TZ: %ld sec\n", cfg.manualTimezoneOffset);
+
+    // Apply weather service settings based on user consent
+    if (cfg.geolocationEnabled && cfg.weatherEnabled) {
+        weatherService.setEnabled(true);
+        weatherEnableItem.setValue(1);
+    } else {
+        weatherService.setEnabled(false);
+        weatherEnableItem.setValue(0);
+    }
+
+    // Apply NTP settings
+    if (cfg.ntpEnabled && cfg.geolocationEnabled) {
+        // Will use geolocation timezone when available
+        ntpConfigured = false;  // Let it configure when WiFi connects
+    } else if (cfg.ntpEnabled && !cfg.geolocationEnabled) {
+        // Use manual timezone offset
+        configTime(cfg.manualTimezoneOffset, 0, "pool.ntp.org", "time.nist.gov");
+        ntpConfigured = true;
+        Serial.printf("[Time] NTP configured with manual offset: %ld sec\n", cfg.manualTimezoneOffset);
+    } else {
+        // NTP disabled
+        Serial.println("[Time] NTP disabled by user");
+    }
 }

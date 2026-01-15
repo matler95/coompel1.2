@@ -26,6 +26,12 @@ private:
     void handleConnect(AsyncWebServerRequest *request);
     void handleStatus(AsyncWebServerRequest *request);
     void handleCaptivePortal(AsyncWebServerRequest *request);
+
+    // Configuration wizard endpoints
+    void handleGetConfig(AsyncWebServerRequest *request);
+    void handleSaveConfig(AsyncWebServerRequest *request);
+    void handleTerms(AsyncWebServerRequest *request);
+    void handlePrivacy(AsyncWebServerRequest *request);
 };
 
 #endif // WEB_INTERFACE_H

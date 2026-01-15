@@ -39,6 +39,19 @@ struct WiFiConfig {
     uint8_t retryCount = 0;
 };
 
+// Device configuration (setup wizard settings)
+struct DeviceConfig {
+    bool setupComplete = false;       // Has wizard been completed?
+    bool wifiEnabled = true;          // Allow WiFi connection
+    bool geolocationEnabled = true;   // Allow IP geolocation
+    bool weatherEnabled = true;       // Allow weather fetching
+    bool ntpEnabled = true;           // Allow NTP time sync
+    int32_t manualTimezoneOffset = 0; // Manual timezone (seconds from UTC)
+    bool termsAccepted = false;       // Legal terms accepted
+    bool privacyAccepted = false;     // Privacy policy accepted
+    uint32_t consentTimestamp = 0;    // When consent was given (epoch)
+};
+
 // Callback type for WiFi events
 using WiFiEventCallback = void (*)(WiFiEvent event);
 
@@ -74,6 +87,14 @@ public:
     String getIPAddress() const;
     String getAPName() const { return _apName; }
 
+    // Device configuration (setup wizard)
+    bool isSetupComplete() const { return _deviceConfig.setupComplete; }
+    const DeviceConfig& getDeviceConfig() const { return _deviceConfig; }
+    void saveDeviceConfig(const DeviceConfig& config);
+    void loadDeviceConfig();
+    void factoryReset();
+    void resetSetupWizard();
+
     // Event callback
     void setEventCallback(WiFiEventCallback callback);
 
@@ -88,6 +109,7 @@ private:
     // Core state
     WiFiState _state = WiFiState::IDLE;
     WiFiConfig _config;
+    DeviceConfig _deviceConfig;
     WiFiEventCallback _eventCallback = nullptr;
 
     // Captive portal components (owned)

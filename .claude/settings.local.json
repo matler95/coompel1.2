@@ -12,7 +12,9 @@
       "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2''; & ''C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe'' run -e esp32c3_dev 2>&1 | Select-Object -Last 20\")",
       "Bash(cmd /c \"cd /d c:\\\\Users\\\\Mateusz\\\\Documents\\\\PlatformIO\\\\Projects\\\\coompel1.2 && C:\\\\Users\\\\Mateusz\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe run\")",
       "Bash(cmd /c:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(C:UsersMateusz.platformiopenvScriptspio.exe run)",
+      "Bash(/c/Users/Mateusz/.platformio/penv/Scripts/pio.exe run:*)"
     ]
   }
 }
