@@ -1416,12 +1416,12 @@ void configureNTP() {
 }
 
 // ============================================================================
-// CLOCK VIEW MODE - Live clock display
+// CLOCK VIEW MODE – Modern live clock
 // ============================================================================
 
 void updateClockViewMode() {
     static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate < 500) return;  // Update 2x per second
+    if (millis() - lastUpdate < 500) return;   // 2 FPS (for blinking colon)
     lastUpdate = millis();
 
     // Ensure NTP is configured
@@ -1433,28 +1433,36 @@ void updateClockViewMode() {
 
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo, 100)) {
-        // No time available
-        display.showTextCentered("No Time", 10, 2);
-        display.drawText("Connect WiFi", 20, 32, 1);
-        display.drawText("to sync time", 20, 42, 1);
-    } else {
-        // Time (large, centered)
-        char timeStr[16];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        display.showTextCentered(timeStr, 8, 2);
-
-        // Weekday (centered)
-        char dayStr[16];
-        strftime(dayStr, sizeof(dayStr), "%A", &timeinfo);
-        display.showTextCentered(dayStr, 30, 1);
-
-        // Date (centered)
-        char dateStr[24];
-        strftime(dateStr, sizeof(dateStr), "%d %B %Y", &timeinfo);
-        display.showTextCentered(dateStr, 42, 1);
+        // ---- No time available ----
+        display.showTextCentered("NO TIME", 14, 2);
+        display.showTextCentered("Connect WiFi", 34, 1);
+        display.showTextCentered("to sync clock", 46, 1);
+        display.update();
+        return;
     }
 
-    // Footer hint
+    // ---- Time (large, modern, blinking colon) ----
+    bool blink = (timeinfo.tm_sec % 2) == 0;
+    char timeStr[6];
+    snprintf(timeStr, sizeof(timeStr),
+             blink ? "%02d:%02d" : "%02d %02d",
+             timeinfo.tm_hour,
+             timeinfo.tm_min);
+
+    display.showTextCentered(timeStr, 6, 3);
+
+    // // ---- Subtle separator line ----
+    // display.drawFastHLine(32, 30, 64, SH110X_WHITE);
+
+    // ---- Day (small) ----
+    char dayStr[10];
+    strftime(dayStr, sizeof(dayStr), "%A", &timeinfo);
+    display.showTextCentered(dayStr, 36, 1);
+
+    // ---- Date (compact, modern) ----
+    char dateStr[16];
+    strftime(dateStr, sizeof(dateStr), "%d %b %Y", &timeinfo);
+    display.showTextCentered(dateStr, 48, 1);
 
     display.update();
 }
@@ -1484,7 +1492,7 @@ void pomodoroBeep() {
 void drawPomodoroRing(float progress) {
     Adafruit_SH1106G* d = display.getRawDisplay();
 
-    int16_t cx = 64, cy = 30, r = 24;
+    int16_t cx = 96, cy = 32, r = 24;
 
     // Outer ring (thin)
     d->drawCircle(cx, cy, r, SH110X_WHITE);
@@ -1561,8 +1569,7 @@ void updatePomodoroViewMode() {
     display.clear();
 
     // Header: Mode label
-    const char* modeLabel = isBreak ? "BREAK" : "WORK";
-    display.drawText(modeLabel, 4, 0, 1);
+    display.drawText("POMODORO", 4, 0, 1);
 
     // Pomodoro count icons
     drawPomodoroCount(pomodoroCount);
@@ -1570,11 +1577,11 @@ void updatePomodoroViewMode() {
     // Draw circular progress ring
     drawPomodoroRing(progress);
 
-    // Time in center of ring (MM:SS)
+    // Time on the left
     uint32_t secs = remaining / 1000;
     char timeStr[8];
     snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", secs / 60, secs % 60);
-    display.showTextCentered(timeStr, 26, 2);
+    display.drawText(timeStr, 4, 22, 2);   // LEFT side
 
     // Status inside ring
     const char* status = "";
@@ -1585,10 +1592,8 @@ void updatePomodoroViewMode() {
         case PomodoroState::BREAK_RUNNING: status = "RELAX"; break;
         case PomodoroState::BREAK_PAUSED: status = "PAUSED"; break;
     }
-    display.showTextCentered(status, 44, 1);
+    display.drawText(status, 8, 42, 1);
 
-    // Footer controls
-    display.drawText("[Click:Pause] [Hold:Stop]", 0, 56, 1);
 
     display.update();
 }
