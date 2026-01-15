@@ -3,7 +3,7 @@
 
 WeatherService::WeatherService()
     : state_(WeatherState::IDLE),
-      enabled_(true),
+      enabled_(false),  // Default disabled - user must opt-in via menu
       updateIntervalSecs_(DEFAULT_UPDATE_INTERVAL),
       locationFetchTime_(0),
       weatherFetchTime_(0),
@@ -461,7 +461,7 @@ void WeatherService::loadCacheFromNVS() {
     }
 
     // Load settings
-    enabled_ = prefs.getBool(KEY_ENABLED, true);
+    enabled_ = prefs.getBool(KEY_ENABLED, false);  // Default off - opt-in required
     updateIntervalSecs_ = prefs.getULong(KEY_INTERVAL, DEFAULT_UPDATE_INTERVAL);
 
     // Load location

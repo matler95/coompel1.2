@@ -40,7 +40,8 @@ enum class AppMode {
     WIFI_SETUP,    // Show captive portal connection info
     WIFI_INFO,     // Show connection status details
     WEATHER_VIEW,  // Show weather forecast
-    WEATHER_ABOUT  // Show weather data attribution
+    WEATHER_ABOUT, // Show weather data attribution
+    WEATHER_PRIVACY // Show privacy info for weather feature
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
@@ -114,9 +115,7 @@ MenuItem wifiForgetItem("Forget Network");
 
 // Weather menu items
 MenuItem weatherMenu("Weather");
-MenuItem weatherTestGeoItem("Test Location");
-MenuItem weatherTestForecastItem("Test Forecast");
-MenuItem weatherEnableItem("Enable Weather");
+MenuItem weatherEnableItem("Weather", 1, 0, 1);  // Toggle: 0=Off, 1=On
 MenuItem weatherViewItem("View Forecast");
 MenuItem weatherPrivacyItem("Privacy Info");
 MenuItem weatherAboutItem("About");
@@ -142,6 +141,7 @@ void updateWiFiSetupMode();
 void updateWiFiInfoMode();
 void updateWeatherViewMode();
 void updateWeatherAboutMode();
+void updateWeatherPrivacyMode();
 
 void resetMenuTimeout();
 void checkMenuTimeout();
@@ -279,6 +279,9 @@ void loop() {
         case AppMode::WEATHER_ABOUT:
             updateWeatherAboutMode();
             break;
+        case AppMode::WEATHER_PRIVACY:
+            updateWeatherPrivacyMode();
+            break;
     }
 
     delay(10);
@@ -388,15 +391,12 @@ void setupMenu() {
 
     // Setup weather menu
     weatherMenu.setType(MenuItemType::SUBMENU);
-    weatherTestGeoItem.setType(MenuItemType::ACTION);
-    weatherTestForecastItem.setType(MenuItemType::ACTION);
-    weatherEnableItem.setType(MenuItemType::ACTION);
+    weatherEnableItem.setType(MenuItemType::TOGGLE);
+    weatherEnableItem.setValue(weatherService.isEnabled() ? 1 : 0);
     weatherViewItem.setType(MenuItemType::ACTION);
     weatherPrivacyItem.setType(MenuItemType::ACTION);
     weatherAboutItem.setType(MenuItemType::ACTION);
 
-    weatherMenu.addChild(&weatherTestGeoItem);
-    weatherMenu.addChild(&weatherTestForecastItem);
     weatherMenu.addChild(&weatherEnableItem);
     weatherMenu.addChild(&weatherViewItem);
     weatherMenu.addChild(&weatherPrivacyItem);
@@ -429,8 +429,6 @@ void setupMenu() {
     wifiForgetItem.setID(MenuItemID::WIFI_FORGET);
 
     weatherMenu.setID(MenuItemID::SETTING_WEATHER);
-    weatherTestGeoItem.setID(MenuItemID::WEATHER_TEST_GEO);
-    weatherTestForecastItem.setID(MenuItemID::WEATHER_TEST_FORECAST);
     weatherEnableItem.setID(MenuItemID::WEATHER_ENABLE);
     weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
     weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
@@ -741,18 +739,15 @@ void onMenuStateChange(MenuItem* item) {
             menuSystem.draw();  // Refresh display
             break;
 
-        case MenuItemID::WEATHER_TEST_GEO:
-            testGeolocation();
-            break;
-
-        case MenuItemID::WEATHER_TEST_FORECAST:
-            testWeatherForecast();
-            break;
-
         case MenuItemID::WEATHER_VIEW:
             weatherViewPage = 0;  // Start at overview
             currentMode = AppMode::WEATHER_VIEW;
             Serial.println("[NAV] Entered weather view");
+            break;
+
+        case MenuItemID::WEATHER_PRIVACY:
+            currentMode = AppMode::WEATHER_PRIVACY;
+            Serial.println("[NAV] Entered weather privacy");
             break;
 
         case MenuItemID::WEATHER_ABOUT:
@@ -781,6 +776,13 @@ void onMenuStateChange(MenuItem* item) {
             settings.motionSensitivity = item->getValue();
             float threshold = 30.0f - (settings.motionSensitivity * 2.0f);
             motion.setShakeThreshold(threshold);
+            break;
+        }
+
+        case MenuItemID::WEATHER_ENABLE: {
+            bool enabled = item->getValue() == 1;
+            weatherService.setEnabled(enabled);
+            Serial.printf("[Weather] %s\n", enabled ? "Enabled" : "Disabled");
             break;
         }
 
@@ -1222,6 +1224,32 @@ void updateWeatherAboutMode() {
     display.drawText("Provided by", 0, 16, 1);
     display.drawText("MET Norway", 0, 28, 1);
     display.drawText("yr.no", 0, 40, 1);
+
+    // Footer hint
+    display.drawText("[Hold to exit]", 0, 56, 1);
+
+    display.update();
+}
+
+// ============================================================================
+// WEATHER PRIVACY MODE - Privacy information screen
+// ============================================================================
+
+void updateWeatherPrivacyMode() {
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate < 500) return;
+    lastUpdate = millis();
+
+    display.clear();
+
+    // Title
+    display.showTextCentered("Privacy Info", 0, 1);
+
+    // Privacy text - explain IP-based geolocation
+    display.drawText("Weather uses", 0, 14, 1);
+    display.drawText("IP geolocation", 0, 24, 1);
+    display.drawText("for city-level", 0, 34, 1);
+    display.drawText("location only.", 0, 44, 1);
 
     // Footer hint
     display.drawText("[Hold to exit]", 0, 56, 1);
