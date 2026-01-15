@@ -30,7 +30,14 @@ public:
     // Forecast data is stored in the provided WeatherForecast struct
     bool fetchForecast(float latitude, float longitude, WeatherForecast& forecast);
 
+    // Get last HTTP response code (for error diagnostics)
+    int getLastHttpCode() const { return lastHttpCode_; }
+
+    // Check if last error was rate limiting (HTTP 429)
+    bool wasRateLimited() const { return lastHttpCode_ == 429; }
+
 private:
+    int lastHttpCode_ = 0;
     // Parse JSON response from MET Norway API
     bool parseResponse(const String& json, WeatherForecast& forecast);
 

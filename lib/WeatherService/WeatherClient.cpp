@@ -5,8 +5,8 @@
 #include <map>
 #include <vector>
 
-WeatherClient::WeatherClient() {
-    // Constructor - nothing to initialize
+WeatherClient::WeatherClient() : lastHttpCode_(0) {
+    // Constructor
 }
 
 bool WeatherClient::fetchForecast(float latitude, float longitude, WeatherForecast& forecast) {
@@ -53,9 +53,15 @@ bool WeatherClient::fetchForecast(float latitude, float longitude, WeatherForeca
     Serial.printf("[Weather] GET %s\n", url);
 
     int httpCode = http.GET();
+    lastHttpCode_ = httpCode;
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[Weather] HTTP error: %d\n", httpCode);
+        if (httpCode == 429) {
+            Serial.println("[Weather] Rate limited! Too many requests.");
+        } else if (httpCode >= 500) {
+            Serial.println("[Weather] Server error - try again later");
+        }
         http.end();
         return false;
     }

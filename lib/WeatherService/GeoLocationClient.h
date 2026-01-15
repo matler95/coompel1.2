@@ -22,7 +22,11 @@ public:
     // Location data is stored in the provided GeoLocation struct
     bool fetchLocation(GeoLocation& location);
 
+    // Get last HTTP response code (for error diagnostics)
+    int getLastHttpCode() const { return lastHttpCode_; }
+
 private:
+    int lastHttpCode_ = 0;
     // Parse JSON response from geolocation API
     bool parseResponse(const String& json, GeoLocation& location);
 

@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 #include "GeoLocationClient.h"
 #include "WeatherClient.h"
 
@@ -24,6 +27,24 @@ enum class WeatherEvent {
     WEATHER_FAILED,
     CACHE_LOADED,
     CACHE_STALE
+};
+
+// Error codes for diagnostics
+enum class WeatherError {
+    NONE = 0,
+    WIFI_NOT_CONNECTED,
+    HTTP_TIMEOUT,
+    HTTP_CONNECTION_FAILED,
+    HTTP_ERROR_400,        // Bad request
+    HTTP_ERROR_403,        // Forbidden
+    HTTP_ERROR_404,        // Not found
+    HTTP_ERROR_429,        // Rate limited
+    HTTP_ERROR_500,        // Server error
+    HTTP_ERROR_OTHER,
+    JSON_PARSE_FAILED,
+    INVALID_RESPONSE,
+    LOCATION_FAILED,
+    WEATHER_FAILED
 };
 
 using WeatherEventCallback = void (*)(WeatherEvent event);
@@ -48,8 +69,11 @@ public:
     // Non-blocking update - call from main loop
     void update();
 
-    // Force immediate update regardless of cache validity
+    // Force immediate update regardless of cache validity (non-blocking)
     bool forceUpdate();
+
+    // Check if background fetch is in progress
+    bool isFetching() const { return fetchInProgress_; }
 
     // Getters
     const WeatherForecast& getForecast() const { return forecast_; }
@@ -58,6 +82,9 @@ public:
     bool hasValidData() const { return forecast_.valid && location_.valid; }
     uint32_t getLastUpdateTime() const { return weatherFetchTime_; }
     uint32_t getNextUpdateTime() const { return nextUpdateTime_; }
+    WeatherError getLastError() const { return lastError_; }
+    uint8_t getRetryCount() const { return retryCount_; }
+    const char* getErrorString() const;
 
     // Configuration
     void setEnabled(bool enabled);
@@ -76,7 +103,12 @@ private:
     void setState(WeatherState newState);
     void triggerEvent(WeatherEvent event);
 
-    // Fetch operations
+    // Background task for non-blocking fetches
+    static void fetchTaskWrapper(void* param);
+    void fetchTask();
+    void startBackgroundFetch(bool includeLocation);
+
+    // Fetch operations (called from background task)
     bool fetchLocation();
     bool fetchWeather();
 
@@ -135,9 +167,14 @@ private:
     static constexpr uint32_t MIN_UPDATE_INTERVAL_SECS = 5UL * 60UL;           // 5 minutes
     static constexpr uint32_t RETRY_DELAY_SECS = 30UL;                         // 30 seconds
     static constexpr uint32_t DEFAULT_UPDATE_INTERVAL = 4UL * 60UL * 60UL;     // 4 hours
+    static constexpr uint32_t WIFI_STABILIZE_MS = 5000UL;                       // Wait 5s after WiFi connects
 
     // Retry tracking
     static constexpr uint8_t MAX_RETRIES = 3;
+
+    // Task settings
+    static constexpr size_t FETCH_TASK_STACK_SIZE = 8192;  // 8KB stack for HTTP/JSON
+    static constexpr UBaseType_t FETCH_TASK_PRIORITY = 1;  // Low priority
 
     // Clients
     GeoLocationClient geoClient_;
@@ -157,12 +194,23 @@ private:
     uint32_t weatherFetchTime_;
     uint32_t lastAttemptTime_;
     uint32_t nextUpdateTime_;
+    uint32_t wifiConnectedTimeMs_;  // When WiFi connection was detected (millis)
 
     // Retry tracking
     uint8_t retryCount_;
+    bool wasConnected_;  // Track WiFi connection state changes
+
+    // Error tracking
+    WeatherError lastError_;
 
     // Callback
     WeatherEventCallback eventCallback_;
+
+    // Background task state
+    volatile bool fetchInProgress_;
+    volatile bool fetchNeedsLocation_;
+    TaskHandle_t fetchTaskHandle_;
+    SemaphoreHandle_t dataMutex_;
 };
 
 #endif // WEATHER_SERVICE_H

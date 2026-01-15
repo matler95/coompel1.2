@@ -9,14 +9,48 @@ WeatherService::WeatherService()
       weatherFetchTime_(0),
       lastAttemptTime_(0),
       nextUpdateTime_(0),
+      wifiConnectedTimeMs_(0),
       retryCount_(0),
-      eventCallback_(nullptr) {
+      wasConnected_(false),
+      lastError_(WeatherError::NONE),
+      eventCallback_(nullptr),
+      fetchInProgress_(false),
+      fetchNeedsLocation_(false),
+      fetchTaskHandle_(nullptr),
+      dataMutex_(nullptr) {
     location_.valid = false;
     forecast_.valid = false;
 }
 
+const char* WeatherService::getErrorString() const {
+    switch (lastError_) {
+        case WeatherError::NONE:                  return "No error";
+        case WeatherError::WIFI_NOT_CONNECTED:    return "WiFi disconnected";
+        case WeatherError::HTTP_TIMEOUT:          return "Connection timeout";
+        case WeatherError::HTTP_CONNECTION_FAILED: return "Connection failed";
+        case WeatherError::HTTP_ERROR_400:        return "Bad request";
+        case WeatherError::HTTP_ERROR_403:        return "Access forbidden";
+        case WeatherError::HTTP_ERROR_404:        return "Not found";
+        case WeatherError::HTTP_ERROR_429:        return "Rate limited";
+        case WeatherError::HTTP_ERROR_500:        return "Server error";
+        case WeatherError::HTTP_ERROR_OTHER:      return "HTTP error";
+        case WeatherError::JSON_PARSE_FAILED:     return "Parse failed";
+        case WeatherError::INVALID_RESPONSE:      return "Invalid response";
+        case WeatherError::LOCATION_FAILED:       return "Location failed";
+        case WeatherError::WEATHER_FAILED:        return "Weather failed";
+        default:                                  return "Unknown error";
+    }
+}
+
 bool WeatherService::init() {
     Serial.println("[WeatherService] Initializing...");
+
+    // Create mutex for thread-safe data access
+    dataMutex_ = xSemaphoreCreateMutex();
+    if (dataMutex_ == nullptr) {
+        Serial.println("[WeatherService] Failed to create mutex");
+        return false;
+    }
 
     // Load cached data and settings from NVS
     loadCacheFromNVS();
@@ -45,12 +79,32 @@ void WeatherService::update() {
         return;
     }
 
-    // Skip if WiFi not connected
-    if (WiFi.status() != WL_CONNECTED) {
+    // Skip if fetch already in progress
+    if (fetchInProgress_) {
         return;
     }
 
-    uint32_t now = millis() / 1000;
+    uint32_t nowMs = millis();
+    uint32_t now = nowMs / 1000;
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+
+    // Track WiFi connection state changes
+    if (isConnected && !wasConnected_) {
+        // WiFi just connected - record time and wait for DNS to stabilize
+        wifiConnectedTimeMs_ = nowMs;
+        wasConnected_ = true;
+        Serial.printf("[WeatherService] WiFi connected, waiting %lu ms for DNS...\n", WIFI_STABILIZE_MS);
+        return;
+    } else if (!isConnected) {
+        wasConnected_ = false;
+        wifiConnectedTimeMs_ = 0;
+        return;
+    }
+
+    // Wait for WiFi/DNS to stabilize after connection (using millisecond precision)
+    if (wifiConnectedTimeMs_ > 0 && (nowMs - wifiConnectedTimeMs_) < WIFI_STABILIZE_MS) {
+        return;
+    }
 
     // Not time for update yet
     if (now < nextUpdateTime_) {
@@ -73,11 +127,82 @@ void WeatherService::update() {
         return;
     }
 
+    // Start background fetch
     lastAttemptTime_ = now;
+    startBackgroundFetch(needsLocation);
+}
+
+bool WeatherService::forceUpdate() {
+    Serial.println("[WeatherService] Force update initiated");
+
+    if (fetchInProgress_) {
+        Serial.println("[WeatherService] Fetch already in progress");
+        return false;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WeatherService] WiFi not connected");
+        return false;
+    }
+
+    // Start background fetch with location refresh
+    startBackgroundFetch(true);
+    return true;
+}
+
+// Static wrapper for FreeRTOS task
+void WeatherService::fetchTaskWrapper(void* param) {
+    WeatherService* self = static_cast<WeatherService*>(param);
+    self->fetchTask();
+    vTaskDelete(nullptr);  // Delete task when done
+}
+
+// Start background fetch task
+void WeatherService::startBackgroundFetch(bool includeLocation) {
+    if (fetchInProgress_) {
+        return;
+    }
+
+    fetchInProgress_ = true;
+    fetchNeedsLocation_ = includeLocation;
+
+    if (includeLocation) {
+        setState(WeatherState::FETCHING_LOCATION);
+    } else {
+        setState(WeatherState::FETCHING_WEATHER);
+    }
+
+    Serial.println("[WeatherService] Starting background fetch task...");
+
+    BaseType_t result = xTaskCreate(
+        fetchTaskWrapper,
+        "WeatherFetch",
+        FETCH_TASK_STACK_SIZE,
+        this,
+        FETCH_TASK_PRIORITY,
+        &fetchTaskHandle_
+    );
+
+    if (result != pdPASS) {
+        Serial.println("[WeatherService] Failed to create fetch task");
+        fetchInProgress_ = false;
+        setState(WeatherState::ERROR);
+        lastError_ = WeatherError::HTTP_CONNECTION_FAILED;
+    }
+}
+
+// Background fetch task - runs in separate FreeRTOS task
+void WeatherService::fetchTask() {
+    Serial.println("[WeatherService] Fetch task started");
+
+    size_t heapBefore = ESP.getFreeHeap();
+    Serial.printf("[WeatherService] Free heap before: %u bytes\n", heapBefore);
+
+    bool success = true;
+    uint32_t now = millis() / 1000;
 
     // Fetch location if needed
-    if (needsLocation) {
-        setState(WeatherState::FETCHING_LOCATION);
+    if (fetchNeedsLocation_) {
         if (!fetchLocation()) {
             retryCount_++;
             if (retryCount_ >= MAX_RETRIES) {
@@ -87,79 +212,65 @@ void WeatherService::update() {
             } else {
                 nextUpdateTime_ = now + RETRY_DELAY_SECS;
             }
-            return;
-        }
-        retryCount_ = 0;
-    }
-
-    // Fetch weather
-    setState(WeatherState::FETCHING_WEATHER);
-    if (!fetchWeather()) {
-        retryCount_++;
-        if (retryCount_ >= MAX_RETRIES) {
-            setState(WeatherState::ERROR);
-            nextUpdateTime_ = now + updateIntervalSecs_;
-            retryCount_ = 0;
+            success = false;
         } else {
-            nextUpdateTime_ = now + RETRY_DELAY_SECS;
+            retryCount_ = 0;
         }
-        return;
     }
 
-    // Success
-    retryCount_ = 0;
-    setState(WeatherState::CACHED);
-    nextUpdateTime_ = now + updateIntervalSecs_;
-}
+    // Fetch weather if location succeeded or wasn't needed
+    if (success) {
+        setState(WeatherState::FETCHING_WEATHER);
 
-bool WeatherService::forceUpdate() {
-    Serial.println("[WeatherService] Force update initiated");
-
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WeatherService] WiFi not connected");
-        return false;
+        if (!fetchWeather()) {
+            retryCount_++;
+            if (retryCount_ >= MAX_RETRIES) {
+                setState(WeatherState::ERROR);
+                nextUpdateTime_ = now + updateIntervalSecs_;
+                retryCount_ = 0;
+            } else {
+                nextUpdateTime_ = now + RETRY_DELAY_SECS;
+            }
+            success = false;
+        } else {
+            retryCount_ = 0;
+        }
     }
 
-    size_t heapBefore = ESP.getFreeHeap();
-    Serial.printf("[WeatherService] Free heap before: %u bytes\n", heapBefore);
-
-    // Always fetch fresh location
-    setState(WeatherState::FETCHING_LOCATION);
-    if (!fetchLocation()) {
-        setState(WeatherState::ERROR);
-        triggerEvent(WeatherEvent::LOCATION_FAILED);
-        return false;
+    // Update state based on result
+    if (success) {
+        setState(WeatherState::CACHED);
+        nextUpdateTime_ = now + updateIntervalSecs_;
     }
-
-    // Fetch weather
-    setState(WeatherState::FETCHING_WEATHER);
-    if (!fetchWeather()) {
-        setState(WeatherState::ERROR);
-        triggerEvent(WeatherEvent::WEATHER_FAILED);
-        return false;
-    }
-
-    // Success
-    setState(WeatherState::CACHED);
-    uint32_t now = millis() / 1000;
-    nextUpdateTime_ = now + updateIntervalSecs_;
-    retryCount_ = 0;
 
     size_t heapAfter = ESP.getFreeHeap();
     Serial.printf("[WeatherService] Free heap after: %u bytes\n", heapAfter);
     Serial.printf("[WeatherService] Heap used: %d bytes\n", (int)(heapBefore - heapAfter));
 
-    return true;
+    fetchTaskHandle_ = nullptr;
+    fetchInProgress_ = false;
+
+    Serial.println("[WeatherService] Fetch task completed");
 }
 
 bool WeatherService::fetchLocation() {
     Serial.println("[WeatherService] Fetching geolocation...");
 
+    if (WiFi.status() != WL_CONNECTED) {
+        lastError_ = WeatherError::WIFI_NOT_CONNECTED;
+        Serial.println("[WeatherService] WiFi not connected");
+        triggerEvent(WeatherEvent::LOCATION_FAILED);
+        return false;
+    }
+
     if (!geoClient_.fetchLocation(location_)) {
+        lastError_ = WeatherError::LOCATION_FAILED;
         Serial.println("[WeatherService] Geolocation fetch failed");
         triggerEvent(WeatherEvent::LOCATION_FAILED);
         return false;
     }
+
+    lastError_ = WeatherError::NONE;
 
     Serial.printf("[WeatherService] Location: %.4f, %.4f (%s, %s)\n",
                  location_.latitude, location_.longitude,
@@ -174,18 +285,28 @@ bool WeatherService::fetchLocation() {
 
 bool WeatherService::fetchWeather() {
     if (!location_.valid) {
+        lastError_ = WeatherError::LOCATION_FAILED;
         Serial.println("[WeatherService] No valid location for weather fetch");
+        return false;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        lastError_ = WeatherError::WIFI_NOT_CONNECTED;
+        Serial.println("[WeatherService] WiFi not connected");
+        triggerEvent(WeatherEvent::WEATHER_FAILED);
         return false;
     }
 
     Serial.println("[WeatherService] Fetching weather forecast...");
 
     if (!weatherClient_.fetchForecast(location_.latitude, location_.longitude, forecast_)) {
+        lastError_ = WeatherError::WEATHER_FAILED;
         Serial.println("[WeatherService] Weather fetch failed");
         triggerEvent(WeatherEvent::WEATHER_FAILED);
         return false;
     }
 
+    lastError_ = WeatherError::NONE;
     Serial.printf("[WeatherService] Weather fetched: %d days\n", forecast_.dayCount);
     for (int i = 0; i < forecast_.dayCount; i++) {
         Serial.printf("[WeatherService]   %s: %.1f-%.1f°C, %.0f%%, %s\n",

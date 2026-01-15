@@ -1089,15 +1089,33 @@ void updateWeatherViewMode() {
 
     if (!weatherService.hasValidData()) {
         display.showTextCentered("Weather", 0, 1);
-        display.drawText("No data", 0, 20, 1);
-        display.drawText("available", 0, 32, 1);
 
-        if (wifi.isConnected()) {
-            display.drawText("Fetching...", 0, 48, 1);
+        WeatherState state = weatherService.getState();
+
+        if (state == WeatherState::FETCHING_LOCATION) {
+            display.drawText("Getting", 0, 20, 1);
+            display.drawText("location...", 0, 32, 1);
+        } else if (state == WeatherState::FETCHING_WEATHER) {
+            display.drawText("Getting", 0, 20, 1);
+            display.drawText("forecast...", 0, 32, 1);
+        } else if (state == WeatherState::ERROR) {
+            display.drawText("Error:", 0, 20, 1);
+            display.drawText(weatherService.getErrorString(), 0, 32, 1);
+
+            // Show retry info
+            char retryStr[24];
+            snprintf(retryStr, sizeof(retryStr), "Retry %d/%d",
+                    weatherService.getRetryCount(), 3);
+            display.drawText(retryStr, 0, 44, 1);
+        } else if (!wifi.isConnected()) {
+            display.drawText("No WiFi", 0, 20, 1);
+            display.drawText("connection", 0, 32, 1);
         } else {
-            display.drawText("No WiFi", 0, 48, 1);
+            display.drawText("No data", 0, 20, 1);
+            display.drawText("available", 0, 32, 1);
         }
 
+        display.drawText("[Hold to exit]", 0, 56, 1);
         display.update();
         return;
     }

@@ -12,8 +12,8 @@ const char* GEO_PROVIDERS[] = {
 };
 const size_t GEO_PROVIDER_COUNT = sizeof(GEO_PROVIDERS) / sizeof(GEO_PROVIDERS[0]);
 
-GeoLocationClient::GeoLocationClient() {
-    // Nothing to initialize
+GeoLocationClient::GeoLocationClient() : lastHttpCode_(0) {
+    // Constructor
 }
 
 bool GeoLocationClient::fetchLocation(GeoLocation& location) {
@@ -61,8 +61,12 @@ bool GeoLocationClient::fetchLocation(GeoLocation& location) {
         }
 
         int httpCode = http.GET();
+        lastHttpCode_ = httpCode;
         if (httpCode != HTTP_CODE_OK) {
             Serial.printf("[GeoLocation] HTTP error: %d\n", httpCode);
+            if (httpCode == 429) {
+                Serial.println("[GeoLocation] Rate limited!");
+            }
             http.end();
             continue;
         }
