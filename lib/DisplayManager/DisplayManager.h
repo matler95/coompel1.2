@@ -21,6 +21,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
+#include "Fonts/FreeMonoBold12pt7b.h"
 
 // Forward declarations for bitmap data
 extern const unsigned char PROGMEM bitmap_idle[];
@@ -120,6 +121,7 @@ public:
      */
     bool isDirty() const { return _dirty; }
 
+    void setFont(const GFXfont* font);  
     // ========================================================================
     // TEXT RENDERING
     // ========================================================================

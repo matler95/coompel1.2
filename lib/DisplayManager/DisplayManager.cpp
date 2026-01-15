@@ -5,7 +5,7 @@
 
 #include "DisplayManager.h"
 #include "bitmaps.h"
-
+#include "Fonts/FreeMonoBold12pt7b.h"
 // ============================================================================
 // CONSTRUCTOR & INITIALIZATION
 // ============================================================================
@@ -47,7 +47,7 @@ bool DisplayManager::init(uint8_t sda_pin, uint8_t scl_pin, uint32_t frequency) 
     _display->clearDisplay();
     _display->setTextColor(SH110X_WHITE);
     _display->setTextWrap(false);
-    // _display->cp437(true);  // Code page 437 font
+    _display->cp437(true);  // Code page 437 font
     // _display->setFont(&Font5x7FixedMono);  // <-- sets global font
 
     _initialized = true;
@@ -159,6 +159,11 @@ void DisplayManager::drawMultiLineText(const char* text, int16_t x, int16_t y,
     }
     _dirty = true;
 }
+    void DisplayManager::setFont(const GFXfont* font) {
+        if (!_initialized) return;
+        _display->setFont(font);
+        _dirty = true;
+    }
 
 // ============================================================================
 // GRAPHICS & BITMAPS
