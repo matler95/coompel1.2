@@ -8,6 +8,7 @@
 static constexpr unsigned long WIFI_CONNECT_TIMEOUT = 30000;   // 30s
 static constexpr unsigned long WIFI_RECONNECT_DELAY = 30000;   // 30s
 static constexpr uint8_t WIFI_MAX_RETRIES = 3;
+static constexpr unsigned long DEFAULT_AP_AUTO_SHUTDOWN_MS = 15UL * 60UL * 1000UL; // 15 minutes
 
 // NVS namespace and keys for device config
 static constexpr const char* NVS_CONFIG_NS = "config";
@@ -43,6 +44,11 @@ bool WiFiManager::init() {
     generateAPName();
     loadCredentials();
     loadDeviceConfig();
+
+    // Apply default AP auto-shutdown if not configured
+    if (_apAutoShutdownMs == 0) {
+        _apAutoShutdownMs = DEFAULT_AP_AUTO_SHUTDOWN_MS;
+    }
 
     // If setup not complete, always start captive portal
     if (!_deviceConfig.setupComplete) {
@@ -132,6 +138,8 @@ void WiFiManager::startCaptivePortal() {
     Serial.printf("[WiFi] AP: %s (%s)\n",
                   _apName.c_str(),
                   _apIP.toString().c_str());
+
+    _apStartTime = millis();
 
     if (!_dnsServer) {
         _dnsServer = new DNSServer();
@@ -351,6 +359,19 @@ void WiFiManager::handleConnectionState() {
 void WiFiManager::handleAPMode() {
     if (_dnsServer) {
         _dnsServer->processNextRequest();
+    }
+
+    // Check for AP auto-shutdown timeout
+    if (_apAutoShutdownMs > 0 && _apStartTime > 0) {
+        unsigned long now = millis();
+        if (now - _apStartTime >= _apAutoShutdownMs) {
+            Serial.println("[WiFi] AP auto-shutdown timeout reached, stopping captive portal");
+            stopCaptivePortal();
+            freeWebServerMemory();
+            _state = WiFiState::IDLE;
+            triggerEvent(WiFiEvent::DISCONNECTED);
+            _apStartTime = 0;
+        }
     }
 }
 

@@ -4,9 +4,9 @@
  * @version 0.9.0
  */
 
-#include <Arduino.h>
-#include "config.h"
-#include "DisplayManager.h"
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
 #include "InputManager.h"
 #include "MotionSensor.h"
 #include "TouchSensor.h"
@@ -15,7 +15,13 @@
 #include "SensorHub.h"
 #include "WiFiManager.h"
 #include "WeatherService.h"
-#include "WeatherIcons.h"
+#include "WiFiManager.h"
+#include "ModeWeather.h"
+#include "PongGame.h"
+#include "SystemStatus.h"
+#include <esp_system.h>
+#include <esp_heap_caps.h>
+#include <config.h>
 
 // ============================================================================
 // GLOBAL OBJECTS
@@ -29,6 +35,8 @@ AnimationEngine animator(&display);
 SensorHub sensors;
 WiFiManager wifi;
 WeatherService weatherService;
+// ModeWeather modeWeather;  // TODO: ModeWeather class not yet implemented
+PongGame pongGame;
 
 // ============================================================================
 // APPLICATION STATE
@@ -39,19 +47,15 @@ enum class AppMode {
     SENSORS,
     WIFI_SETUP,     // Show captive portal connection info
     WIFI_INFO,      // Show connection status details
-    WEATHER_VIEW,   // Show weather forecast
-    WEATHER_ABOUT,  // Show weather data attribution
-    WEATHER_PRIVACY,// Show privacy info for weather feature
     CLOCK_VIEW,     // Show live clock
-    POMODORO_VIEW   // Pomodoro timer
+    POMODORO_VIEW,  // Pomodoro timer
+    PONG_GAME       // Pong game
 };
 
 AppMode currentMode = AppMode::ANIMATIONS;
 // Encoder edit mode: when true, rotating adjusts the current VALUE/TOGGLE item;
 // when false, rotating moves selection up/down.
 bool encoderEditMode = false;
-// Weather view page: 0 = overview, 1-4 = individual day details
-uint8_t weatherViewPage = 0;
 // NTP time sync state
 bool ntpConfigured = false;
 
@@ -73,7 +77,10 @@ constexpr uint32_t POMODORO_BREAK_MS = 5UL * 60UL * 1000UL;   // 5 minutes
 unsigned long lastBlinkTime = 0;
 unsigned long nextBlinkDelay = 5000;  // Next blink in 5 seconds
 unsigned long lastWinkCheck = 0;
-unsigned long nextWinkDelay = 20000;  // Check for wink in 20 seconds
+unsigned long nextWinkDelay = 20000;  // Motion detection
+
+// Simple global status aggregation for UI (defined in shared header)
+SystemStatus systemStatus;
 
 // Shake detection
 bool isShaking = false;
@@ -83,6 +90,10 @@ const unsigned long SHAKE_COOLDOWN = 1000;  // 1 second
 // Menu timeout
 unsigned long lastMenuActivity = 0;
 const unsigned long MENU_TIMEOUT_MS = 10000;  // 10 seconds
+
+// Global idle tracking for power management
+unsigned long lastUserActivity = 0;
+bool displaySleeping = false;
 
 // ============================================================================
 // SETTINGS
@@ -128,13 +139,6 @@ MenuItem wifiConfigureItem("Configure");
 MenuItem wifiStatusItem("Status");
 MenuItem wifiForgetItem("Forget Network");
 
-// Weather menu items
-MenuItem weatherMenu("Weather");
-MenuItem weatherEnableItem("Weather", 1, 0, 1);  // Toggle: 0=Off, 1=On
-MenuItem weatherViewItem("View Forecast");
-MenuItem weatherPrivacyItem("Privacy Info");
-MenuItem weatherAboutItem("About");
-
 // System menu items (factory reset, re-run setup)
 MenuItem systemMenu("System");
 MenuItem rerunSetupItem("Re-run Setup");
@@ -145,6 +149,9 @@ MenuItem clockItem("Clock");
 
 // Pomodoro menu item
 MenuItem pomodoroItem("Pomodoro");
+
+// Games menu item
+MenuItem pongItem("Pong");
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -165,12 +172,10 @@ void updateMenuMode();
 void updateSensorsMode();
 void updateWiFiSetupMode();
 void updateWiFiInfoMode();
-void updateWeatherViewMode();
-void updateWeatherAboutMode();
-void updateWeatherPrivacyMode();
 void updateClockViewMode();
 void configureNTP();
 void updatePomodoroViewMode();
+void updatePongGameMode();
 void drawPomodoroRing(float progress);
 void drawPomodoroCount(uint8_t count);
 void setupBuzzer();
@@ -183,6 +188,7 @@ void applyDeviceConfig();
 void showSetupRequiredScreen();
 void onWiFiEvent(WiFiEvent event);
 void drawWiFiStatusIcon();
+void onUserActivity();
 
 // ============================================================================
 // SETUP
@@ -201,7 +207,7 @@ void setup() {
         Serial.println("[ERROR] Display failed!");
         while (1) delay(1000);
     }
-    
+
     // Initialize animation engine
     animator.init();
 
@@ -267,6 +273,9 @@ void setup() {
     scheduleNextBlink();
     scheduleNextWinkCheck();
 
+    // Initialize user activity timestamp for idle power management
+    lastUserActivity = millis();
+
     Serial.println("\n[INIT] System ready!");
     Serial.println("Natural behaviors:");
     Serial.println("  - Random blinks");
@@ -282,6 +291,10 @@ void setup() {
 
 void loop() {
     unsigned long currentTime = millis();
+    // Health instrumentation
+    uint32_t loopStartUs = micros();
+    static uint32_t maxLoopWorkUs = 0;
+    static unsigned long lastHealthLog = 0;
     
     // Update all systems
     input.update();
@@ -321,21 +334,44 @@ void loop() {
         case AppMode::WIFI_INFO:
             updateWiFiInfoMode();
             break;
-        case AppMode::WEATHER_VIEW:
-            updateWeatherViewMode();
-            break;
-        case AppMode::WEATHER_ABOUT:
-            updateWeatherAboutMode();
-            break;
-        case AppMode::WEATHER_PRIVACY:
-            updateWeatherPrivacyMode();
-            break;
         case AppMode::CLOCK_VIEW:
             updateClockViewMode();
             break;
         case AppMode::POMODORO_VIEW:
             updatePomodoroViewMode();
             break;
+        case AppMode::PONG_GAME:
+            updatePongGameMode();
+            break;
+    }
+
+    // Loop work time (excluding cooperative delay below)
+    uint32_t workUs = micros() - loopStartUs;
+    if (workUs > maxLoopWorkUs) {
+        maxLoopWorkUs = workUs;
+    }
+
+    // Periodic health log every 10 seconds
+    unsigned long nowMs = millis();
+    if (nowMs - lastHealthLog >= 10000UL) {
+        size_t freeHeap = ESP.getFreeHeap();
+        size_t largestFree = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+        Serial.printf("[HEALTH] freeHeap=%uB largestFree=%uB maxLoopWork=%.2fms\n",
+                      (unsigned)freeHeap,
+                      (unsigned)largestFree,
+                      (double)maxLoopWorkUs / 1000.0);
+        lastHealthLog = nowMs;
+        maxLoopWorkUs = 0;
+    }
+
+    // ---------------------------------------------------------------------
+    // Idle-based display power management
+    // ---------------------------------------------------------------------
+    unsigned long idleMs = nowMs - lastUserActivity;
+    if (!displaySleeping && idleMs >= SLEEP_TIMEOUT_MS) {
+        Serial.printf("[POWER] Idle for %lu ms, turning display off\n", idleMs);
+        display.setPower(false);
+        displaySleeping = true;
     }
 
     delay(10);
@@ -395,6 +431,7 @@ void scheduleNextWinkCheck() {
 void setupMenu() {
     mainMenu.addChild(&clockItem);
     mainMenu.addChild(&pomodoroItem);
+    mainMenu.addChild(&pongItem);
     mainMenu.addChild(&animationsMenu);
     mainMenu.addChild(&sensorsMenu);
     mainMenu.addChild(&settingsMenu);
@@ -410,6 +447,10 @@ void setupMenu() {
     // Pomodoro item setup
     pomodoroItem.setType(MenuItemType::ACTION);
     pomodoroItem.setID(MenuItemID::POMODORO_VIEW);
+
+    // Pong game item setup
+    pongItem.setType(MenuItemType::ACTION);
+    pongItem.setID(MenuItemID::PONG_GAME);
 
     idleAnimItem.setType(MenuItemType::ACTION);
     winkAnimItem.setType(MenuItemType::ACTION);
@@ -440,7 +481,6 @@ void setupMenu() {
     settingsMenu.addChild(&soundItem);
     settingsMenu.addChild(&sensitivityItem);
     settingsMenu.addChild(&wifiMenu);
-    settingsMenu.addChild(&weatherMenu);
     settingsMenu.addChild(&systemMenu);
 
     // WiFi submenu
@@ -453,19 +493,6 @@ void setupMenu() {
     wifiMenu.addChild(&wifiConfigureItem);
     wifiMenu.addChild(&wifiStatusItem);
     wifiMenu.addChild(&wifiForgetItem);
-
-    // Setup weather menu
-    weatherMenu.setType(MenuItemType::SUBMENU);
-    weatherEnableItem.setType(MenuItemType::TOGGLE);
-    weatherEnableItem.setValue(weatherService.isEnabled() ? 1 : 0);
-    weatherViewItem.setType(MenuItemType::ACTION);
-    weatherPrivacyItem.setType(MenuItemType::ACTION);
-    weatherAboutItem.setType(MenuItemType::ACTION);
-
-    weatherMenu.addChild(&weatherEnableItem);
-    weatherMenu.addChild(&weatherViewItem);
-    weatherMenu.addChild(&weatherPrivacyItem);
-    weatherMenu.addChild(&weatherAboutItem);
 
     // Setup system menu (factory reset, re-run setup)
     systemMenu.setType(MenuItemType::SUBMENU);
@@ -501,12 +528,6 @@ void setupMenu() {
     wifiStatusItem.setID(MenuItemID::WIFI_STATUS);
     wifiForgetItem.setID(MenuItemID::WIFI_FORGET);
 
-    weatherMenu.setID(MenuItemID::SETTING_WEATHER);
-    weatherEnableItem.setID(MenuItemID::WEATHER_ENABLE);
-    weatherViewItem.setID(MenuItemID::WEATHER_VIEW);
-    weatherPrivacyItem.setID(MenuItemID::WEATHER_PRIVACY);
-    weatherAboutItem.setID(MenuItemID::WEATHER_ABOUT);
-
     systemMenu.setID(MenuItemID::SETTING_SYSTEM);
     rerunSetupItem.setID(MenuItemID::SYSTEM_RERUN_SETUP);
     factoryResetItem.setID(MenuItemID::SYSTEM_FACTORY_RESET);
@@ -520,6 +541,7 @@ void setupMenu() {
 // ============================================================================
 
 void onButtonEvent(ButtonEvent event) {
+    onUserActivity();
     if (currentMode == AppMode::ANIMATIONS) {
         if (event == ButtonEvent::CLICK || event == ButtonEvent::LONG_PRESS) {
             currentMode = AppMode::MENU;
@@ -609,6 +631,20 @@ void onButtonEvent(ButtonEvent event) {
             resetMenuTimeout();
             menuSystem.draw();
         }
+    } else if (currentMode == AppMode::PONG_GAME) {
+        if (event == ButtonEvent::CLICK) {
+            PongState state = pongGame.getState();
+            if (state == PongState::READY || state == PongState::GAME_OVER) {
+                pongGame.startGame();
+            } else if (state == PongState::PLAYING || state == PongState::PAUSED) {
+                pongGame.togglePause();
+            }
+        } else if (event == ButtonEvent::LONG_PRESS) {
+            currentMode = AppMode::MENU;
+            resetMenuTimeout();
+            menuSystem.draw();
+            Serial.println("[NAV] Exited Pong game");
+        }
     } else {
         if (event == ButtonEvent::LONG_PRESS) {
             currentMode = AppMode::MENU;
@@ -622,6 +658,7 @@ void onButtonEvent(ButtonEvent event) {
 
 void onTouchEvent(TouchEvent event) {
     #if TOUCH_ENABLED
+    onUserActivity();
     if (currentMode == AppMode::ANIMATIONS) {
         switch (event) {
             case TouchEvent::TAP:
@@ -671,6 +708,7 @@ void onTouchEvent(TouchEvent event) {
 }
 
 void onMotionEvent(MotionEvent event) {
+    onUserActivity();
     if (event == MotionEvent::SHAKE) {
         lastShakeTime = millis();
 
@@ -705,6 +743,7 @@ void onMotionEvent(MotionEvent event) {
 
 void resetMenuTimeout() {
     lastMenuActivity = millis();
+    onUserActivity();
 }
 
 void checkMenuTimeout() {
@@ -721,6 +760,22 @@ void checkMenuTimeout() {
     }
 }
 
+// =========================================================================
+// GLOBAL IDLE / POWER MANAGEMENT
+// =========================================================================
+
+void onUserActivity() {
+    lastUserActivity = millis();
+
+    // Wake display if it was put to sleep due to inactivity
+    if (displaySleeping) {
+        display.setPower(true);
+        applyBrightnessFromSettings();
+        displaySleeping = false;
+        Serial.println("[POWER] Woke display from idle sleep");
+    }
+}
+
 // ============================================================================
 // BRIGHTNESS HELPER
 // ============================================================================
@@ -734,82 +789,6 @@ void applyBrightnessFromSettings() {
     // Map 10–100% to a usable contrast range (approx. 10–100% of 255)
     uint8_t level = map(percent, 10, 100, 26, 255);
     display.setBrightness(level);
-}
-
-// ============================================================================
-// WEATHER HELPERS
-// ============================================================================
-
-void testGeolocation() {
-    if (!wifi.isConnected()) {
-        Serial.println("[Weather] Not connected to WiFi");
-        return;
-    }
-
-    Serial.println("[Weather] Force updating weather service...");
-
-    // Force update to get fresh data
-    if (weatherService.forceUpdate()) {
-        const GeoLocation& location = weatherService.getLocation();
-        const WeatherForecast& forecast = weatherService.getForecast();
-
-        Serial.println("[Weather] Update successful!");
-        Serial.printf("[Weather] Location: %.4f, %.4f (%s, %s)\n",
-                      location.latitude, location.longitude,
-                      location.city, location.country);
-
-        if (forecast.valid) {
-            Serial.printf("[Weather] Forecast: %d days\n", forecast.dayCount);
-            for (int i = 0; i < forecast.dayCount; i++) {
-                Serial.printf("[Weather]   %s: %.1f-%.1f°C, %.0f%%, %s\n",
-                              forecast.days[i].date,
-                              forecast.days[i].tempMin,
-                              forecast.days[i].tempMax,
-                              forecast.days[i].humidity,
-                              forecast.days[i].symbolCode);
-            }
-        }
-
-        Serial.printf("[Weather] Data cached, update interval: %lu hours\n",
-                     weatherService.getUpdateInterval() / 3600UL);
-    } else {
-        Serial.println("[Weather] Update failed");
-    }
-}
-
-void testWeatherForecast() {
-    Serial.println("[Weather] Checking cached weather data...");
-
-    if (weatherService.hasValidData()) {
-        const GeoLocation& location = weatherService.getLocation();
-        const WeatherForecast& forecast = weatherService.getForecast();
-
-        Serial.printf("[Weather] Location: %s, %s\n", location.city, location.country);
-        Serial.printf("[Weather] Forecast: %d days\n", forecast.dayCount);
-
-        for (int i = 0; i < forecast.dayCount; i++) {
-            Serial.printf("[Weather]   %s: %.1f-%.1f°C, %.0f%%, %s\n",
-                          forecast.days[i].date,
-                          forecast.days[i].tempMin,
-                          forecast.days[i].tempMax,
-                          forecast.days[i].humidity,
-                          forecast.days[i].symbolCode);
-        }
-
-        uint32_t lastUpdate = weatherService.getLastUpdateTime();
-        uint32_t now = millis() / 1000;
-        uint32_t timeSince = now - lastUpdate;
-        Serial.printf("[Weather] Last update: %lu seconds ago\n", timeSince);
-
-        WeatherState state = weatherService.getState();
-        Serial.printf("[Weather] State: %s\n",
-                     state == WeatherState::CACHED ? "CACHED" :
-                     state == WeatherState::STALE ? "STALE" :
-                     state == WeatherState::ERROR ? "ERROR" : "OTHER");
-    } else {
-        Serial.println("[Weather] No valid weather data available");
-        Serial.println("[Weather] Use 'Test Geolocation' to fetch data");
-    }
 }
 
 // ============================================================================
@@ -860,22 +839,6 @@ void onMenuStateChange(MenuItem* item) {
             menuSystem.draw();  // Refresh display
             break;
 
-        case MenuItemID::WEATHER_VIEW:
-            weatherViewPage = 0;  // Start at overview
-            currentMode = AppMode::WEATHER_VIEW;
-            Serial.println("[NAV] Entered weather view");
-            break;
-
-        case MenuItemID::WEATHER_PRIVACY:
-            currentMode = AppMode::WEATHER_PRIVACY;
-            Serial.println("[NAV] Entered weather privacy");
-            break;
-
-        case MenuItemID::WEATHER_ABOUT:
-            currentMode = AppMode::WEATHER_ABOUT;
-            Serial.println("[NAV] Entered weather about");
-            break;
-
         case MenuItemID::CLOCK_VIEW:
             currentMode = AppMode::CLOCK_VIEW;
             Serial.println("[NAV] Entered clock view");
@@ -884,6 +847,12 @@ void onMenuStateChange(MenuItem* item) {
         case MenuItemID::POMODORO_VIEW:
             currentMode = AppMode::POMODORO_VIEW;
             Serial.println("[NAV] Entered pomodoro timer");
+            break;
+
+        case MenuItemID::PONG_GAME:
+            pongGame.reset();
+            currentMode = AppMode::PONG_GAME;
+            Serial.println("[NAV] Entered Pong game");
             break;
 
         case MenuItemID::SYSTEM_RERUN_SETUP:
@@ -920,13 +889,6 @@ void onMenuStateChange(MenuItem* item) {
             break;
         }
 
-        case MenuItemID::WEATHER_ENABLE: {
-            bool enabled = item->getValue() == 1;
-            weatherService.setEnabled(enabled);
-            Serial.printf("[Weather] %s\n", enabled ? "Enabled" : "Disabled");
-            break;
-        }
-
         default:
             break;
     }
@@ -951,22 +913,18 @@ void updateMenuMode() {
 // ============================================================================
 
 void onEncoderEvent(EncoderEvent event, int32_t /*position*/) {
-    // Handle weather view navigation
-    if (currentMode == AppMode::WEATHER_VIEW) {
-        if (event == EncoderEvent::ROTATED_CW || event == EncoderEvent::ROTATED_CCW) {
-            const WeatherForecast& forecast = weatherService.getForecast();
-            uint8_t maxPage = forecast.valid ? forecast.dayCount : 0;
+    // Handle WiFi setup navigation
+    if (currentMode == AppMode::WIFI_SETUP) {
+        // TODO: wifi.handleCaptivePortalInput(event) not yet implemented
+        return;
+    }
 
-            if (event == EncoderEvent::ROTATED_CW) {
-                weatherViewPage++;
-                if (weatherViewPage > maxPage) weatherViewPage = 0;
-            } else {
-                if (weatherViewPage == 0) {
-                    weatherViewPage = maxPage;
-                } else {
-                    weatherViewPage--;
-                }
-            }
+    // Handle Pong game input
+    if (currentMode == AppMode::PONG_GAME) {
+        if (event == EncoderEvent::ROTATED_CW) {
+            pongGame.setPlayerInput(1);   // Move paddle down
+        } else if (event == EncoderEvent::ROTATED_CCW) {
+            pongGame.setPlayerInput(-1);  // Move paddle up
         }
         return;
     }
@@ -1104,6 +1062,10 @@ void updateSensorsMode() {
 // ============================================================================
 
 void onWiFiEvent(WiFiEvent event) {
+    // Keep global status in sync for UI
+    systemStatus.wifiState = wifi.getState();
+    systemStatus.wifiConnected = wifi.isConnected();
+
     switch (event) {
         case WiFiEvent::AP_STARTED:
             Serial.println("[WiFi] Captive portal started");
@@ -1115,6 +1077,7 @@ void onWiFiEvent(WiFiEvent event) {
         case WiFiEvent::CONNECTED:
             Serial.printf("[WiFi] Connected to %s\n", wifi.getSSID());
             Serial.printf("[WiFi] IP: %s\n", wifi.getIPAddress().c_str());
+            systemStatus.wifiConnected = true;
             if (currentMode == AppMode::WIFI_SETUP) {
                 currentMode = AppMode::ANIMATIONS;
             }
@@ -1122,10 +1085,12 @@ void onWiFiEvent(WiFiEvent event) {
 
         case WiFiEvent::DISCONNECTED:
             Serial.println("[WiFi] Disconnected");
+            systemStatus.wifiConnected = false;
             break;
 
         case WiFiEvent::FAILED:
             Serial.println("[WiFi] Connection failed");
+            systemStatus.wifiConnected = false;
             break;
 
         default:
@@ -1216,182 +1181,6 @@ void updateWiFiInfoMode() {
         display.drawText("Not configured", 0, 16, 1);
     }
 
-    display.update();
-}
-
-// ============================================================================
-// WEATHER VIEW MODE
-// ============================================================================
-
-void updateWeatherViewMode() {
-    static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate < 100) return;
-    lastUpdate = millis();
-
-    display.clear();
-
-    if (!weatherService.hasValidData()) {
-        display.showTextCentered("Weather", 0, 1);
-
-        WeatherState state = weatherService.getState();
-
-        if (state == WeatherState::FETCHING_LOCATION) {
-            display.drawText("Getting", 0, 20, 1);
-            display.drawText("location...", 0, 32, 1);
-        } else if (state == WeatherState::FETCHING_WEATHER) {
-            display.drawText("Getting", 0, 20, 1);
-            display.drawText("forecast...", 0, 32, 1);
-        } else if (state == WeatherState::ERROR) {
-            display.drawText("Error:", 0, 20, 1);
-            display.drawText(weatherService.getErrorString(), 0, 32, 1);
-
-            // Show retry info
-            char retryStr[24];
-            snprintf(retryStr, sizeof(retryStr), "Retry %d/%d",
-                    weatherService.getRetryCount(), 3);
-            display.drawText(retryStr, 0, 44, 1);
-        } else if (!wifi.isConnected()) {
-            display.drawText("No WiFi", 0, 20, 1);
-            display.drawText("connection", 0, 32, 1);
-        } else {
-            display.drawText("No data", 0, 20, 1);
-            display.drawText("available", 0, 32, 1);
-        }
-
-        display.update();
-        return;
-    }
-
-    const WeatherForecast& forecast = weatherService.getForecast();
-    const GeoLocation& location = weatherService.getLocation();
-
-    if (weatherViewPage == 0) {
-        // Overview page: show all 4 days in compact format
-        // Header: City name
-        display.drawText(location.city, 0, 0, 1);
-
-        // Show 4 days in compact format
-        // Each row: icon (8px) + date (5 chars) + temp range
-        for (int i = 0; i < forecast.dayCount && i < 4; i++) {
-            int y = 14 + (i * 12);
-
-            // Draw weather icon (8x8)
-            const uint8_t* icon = getWeatherIcon(forecast.days[i].symbolCode);
-            display.drawBitmap(icon, 0, y, 8, 8, 1);
-
-            // Date: show day of month only (chars 8-9 from YYYY-MM-DD)
-            char dayNum[4];
-            strncpy(dayNum, &forecast.days[i].date[8], 2);
-            dayNum[2] = '\0';
-            display.drawText(dayNum, 12, y, 1);
-
-            // Temperature range
-            char tempStr[16];
-            snprintf(tempStr, sizeof(tempStr), "%.0f/%.0f",
-                    forecast.days[i].tempMin, forecast.days[i].tempMax);
-            display.drawText(tempStr, 30, y, 1);
-
-            // Humidity
-            char humStr[8];
-            snprintf(humStr, sizeof(humStr), "%.0f%%", forecast.days[i].humidity);
-            display.drawText(humStr, 80, y, 1);
-        }
-
-        // Footer: scroll hint
-        display.drawText("Rotate: details", 0, 56, 1);
-
-    } else {
-        // Detail page for single day (1-4)
-        uint8_t dayIdx = weatherViewPage - 1;
-        if (dayIdx >= forecast.dayCount) {
-            weatherViewPage = 0;
-            return;
-        }
-
-        const DailyForecast& day = forecast.days[dayIdx];
-
-        // Header: Full date
-        display.drawText(day.date, 0, 0, 1);
-
-        // Large weather icon (centered, 8x8 but we can draw it larger conceptually)
-        const uint8_t* icon = getWeatherIcon(day.symbolCode);
-        display.drawBitmap(icon, 60, 0, 8, 8, 1);
-
-        // Temperature
-        char tempLine[32];
-        snprintf(tempLine, sizeof(tempLine), "Temp: %.1f - %.1f C",
-                day.tempMin, day.tempMax);
-        display.drawText(tempLine, 0, 16, 1);
-
-        // Humidity
-        char humLine[20];
-        snprintf(humLine, sizeof(humLine), "Humidity: %.0f%%", day.humidity);
-        display.drawText(humLine, 0, 28, 1);
-
-        // Weather condition
-        display.drawText("Cond:", 0, 40, 1);
-        // Truncate symbol code if too long
-        char symbolShort[16];
-        strncpy(symbolShort, day.symbolCode, 15);
-        symbolShort[15] = '\0';
-        display.drawText(symbolShort, 36, 40, 1);
-
-        // Footer: navigation hint
-        char navHint[24];
-        snprintf(navHint, sizeof(navHint), "Day %d/%d  Rotate:nav",
-                dayIdx + 1, forecast.dayCount);
-        display.drawText(navHint, 0, 56, 1);
-    }
-
-    display.update();
-}
-
-// ============================================================================
-// WEATHER ABOUT MODE - Attribution screen
-// ============================================================================
-
-void updateWeatherAboutMode() {
-    static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate < 500) return;
-    lastUpdate = millis();
-
-    display.clear();
-
-    // Title
-    display.showTextCentered("Weather Data", 0, 1);
-
-    // Attribution text
-    display.drawText("Provided by", 0, 16, 1);
-    display.drawText("MET Norway", 0, 28, 1);
-    display.drawText("yr.no", 0, 40, 1);
-
-    // Footer hint
-    
-    display.update();
-}
-
-// ============================================================================
-// WEATHER PRIVACY MODE - Privacy information screen
-// ============================================================================
-
-void updateWeatherPrivacyMode() {
-    static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate < 500) return;
-    lastUpdate = millis();
-
-    display.clear();
-
-    // Title
-    display.showTextCentered("Privacy Info", 0, 1);
-
-    // Privacy text - explain IP-based geolocation
-    display.drawText("Weather uses", 0, 14, 1);
-    display.drawText("IP geolocation", 0, 24, 1);
-    display.drawText("for city-level", 0, 34, 1);
-    display.drawText("location only.", 0, 44, 1);
-
-    // Footer hint
-    
     display.update();
 }
 
@@ -1598,6 +1387,11 @@ void updatePomodoroViewMode() {
     display.update();
 }
 
+void updatePongGameMode() {
+    pongGame.update();
+    pongGame.render(display);
+}
+
 // ============================================================================
 // DEVICE CONFIGURATION HELPERS
 // ============================================================================
@@ -1623,10 +1417,10 @@ void applyDeviceConfig() {
     // Apply weather service settings based on user consent
     if (cfg.geolocationEnabled && cfg.weatherEnabled) {
         weatherService.setEnabled(true);
-        weatherEnableItem.setValue(1);
+        // TODO: weatherEnableItem.setValue(1); - menu item not yet implemented
     } else {
         weatherService.setEnabled(false);
-        weatherEnableItem.setValue(0);
+        // TODO: weatherEnableItem.setValue(0); - menu item not yet implemented
     }
 
     // Apply NTP settings

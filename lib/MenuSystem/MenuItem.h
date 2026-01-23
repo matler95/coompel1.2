@@ -86,6 +86,9 @@ enum class MenuItemID : uint16_t {
     // Pomodoro timer
     POMODORO_VIEW = 49,
 
+    // Games
+    PONG_GAME = 80,
+
     // System menu items
     SETTING_SYSTEM = 50,
     SYSTEM_RERUN_SETUP = 501,

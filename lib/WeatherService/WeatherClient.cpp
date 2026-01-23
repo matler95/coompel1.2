@@ -4,6 +4,21 @@
 #include <WiFiClientSecure.h>
 #include <map>
 #include <vector>
+#include "config.h"
+
+namespace {
+    void configureSecureClient(WiFiClientSecure& client) {
+        // Default: keep existing insecure behavior unless caller opts into CA validation
+        // To enable real TLS verification for MET Norway API, define WEATHER_TLS_USE_CA_CERT=1
+        // at build time and provide a WEATHER_ROOT_CA_PEM symbol (PEM-encoded CA/cert in flash).
+#if defined(WEATHER_TLS_USE_CA_CERT) && (WEATHER_TLS_USE_CA_CERT == 1)
+        extern const char WEATHER_ROOT_CA_PEM[] PROGMEM;
+        client.setCACert(WEATHER_ROOT_CA_PEM);
+#else
+        client.setInsecure();
+#endif
+    }
+}
 
 WeatherClient::WeatherClient() : lastHttpCode_(0) {
     // Constructor
@@ -37,7 +52,7 @@ bool WeatherClient::fetchForecast(float latitude, float longitude, WeatherForeca
     snprintf(url, sizeof(url), "%s?lat=%.4f&lon=%.4f", API_URL, latitude, longitude);
 
     WiFiClientSecure client;
-    client.setInsecure();  // Skip TLS verification
+    configureSecureClient(client);
 
     HTTPClient http;
     http.setTimeout(TIMEOUT_MS);

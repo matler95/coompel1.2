@@ -2,8 +2,23 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include "config.h"
 
 #define TIMEOUT_MS 10000  // HTTP timeout
+
+namespace {
+    void configureSecureClient(WiFiClientSecure& client) {
+        // Default: keep existing insecure behavior unless caller opts into CA validation
+        // To enable real TLS verification for geolocation APIs, define GEO_TLS_USE_CA_CERT=1
+        // at build time and provide a GEO_ROOT_CA_PEM symbol (PEM-encoded CA/cert in flash).
+#if defined(GEO_TLS_USE_CA_CERT) && (GEO_TLS_USE_CA_CERT == 1)
+        extern const char GEO_ROOT_CA_PEM[] PROGMEM;
+        client.setCACert(GEO_ROOT_CA_PEM);
+#else
+        client.setInsecure();
+#endif
+    }
+}
 
 // Geo providers (primary + fallback)
 const char* GEO_PROVIDERS[] = {
@@ -33,17 +48,8 @@ bool GeoLocationClient::fetchLocation(GeoLocation& location) {
         return false;
     }
 
-    // Optional: Force reliable DNS (Google DNS)
-    WiFi.config(
-        WiFi.localIP(),
-        WiFi.gatewayIP(),
-        WiFi.subnetMask(),
-        IPAddress(8, 8, 8, 8),
-        IPAddress(8, 8, 4, 4)
-    );
-
     WiFiClientSecure client;
-    client.setInsecure();  // Skip TLS verification for simplicity
+    configureSecureClient(client);
 
     HTTPClient http;
     http.setTimeout(TIMEOUT_MS);

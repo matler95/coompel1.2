@@ -14,7 +14,9 @@
       "Bash(cmd /c:*)",
       "Bash(powershell:*)",
       "Bash(C:UsersMateusz.platformiopenvScriptspio.exe run)",
-      "Bash(/c/Users/Mateusz/.platformio/penv/Scripts/pio.exe run:*)"
+      "Bash(/c/Users/Mateusz/.platformio/penv/Scripts/pio.exe run:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(\"C:/Users/Mateusz/.platformio/penv/Scripts/pio.exe\" run -d \"c:/Users/Mateusz/Documents/PlatformIO/Projects/coompel1.2\")"
     ]
   }
 }

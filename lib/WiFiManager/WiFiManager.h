@@ -105,6 +105,11 @@ public:
     // Web server access (used by WebInterface only)
     AsyncWebServer* getWebServer() const { return _webServer; }
 
+    // Scheduling and AP management
+    void scheduleRestart(unsigned long delayMs = 500);
+    void setAPAutoShutdownMs(uint32_t ms) { _apAutoShutdownMs = ms; }
+    uint32_t getAPAutoShutdownMs() const { return _apAutoShutdownMs; }
+
 private:
     // Core state
     WiFiState _state = WiFiState::IDLE;
@@ -133,6 +138,12 @@ private:
     // Deferred connection after form submit
     unsigned long _pendingConnectionTime = 0;
     bool _pendingConnection = false;
+
+    // AP auto-shutdown and restart scheduling
+    uint32_t _apAutoShutdownMs = 0;      // 0 = no auto-shutdown
+    unsigned long _apStartTime = 0;      // millis() when AP started
+    bool _restartScheduled = false;      // scheduled system restart flag
+    unsigned long _restartAtMs = 0;      // when to perform restart
 
     // Internal helpers
     void loadCredentials();
